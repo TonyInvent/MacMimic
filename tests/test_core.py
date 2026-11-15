@@ -112,3 +112,16 @@ def test_checkpoint_roundtrip(tmp_path):
     ck = load_tree(str(tmp_path / "ck"))
     assert ck["meta"]["iteration"] == 7 and float(ck["opt"]["t"]) == 3.0 and ck["opt"]["m"]["a.b"].shape == (2,)
     assert set(ck["pi"]) == set(p) and all(mx.array_equal(ck["pi"][k], p[k]) for k in p)
+
+
+def test_backward_stays_finite_for_large_preactivations():
+    """nn.elu's untaken exp branch overflows for x > ~88 and its gradient inf * 0 = NaN poisoned every policy gradient
+    (bf16 runs from ~iteration 750); the MLP's ELU and the rotation helpers must keep finite gradients."""
+    from supermimic_mlx.networks import MLP, elu
+
+    x = mx.array([-3.0, 0.5, 100.0, 1000.0])
+    assert bool(mx.isfinite(mx.grad(lambda x: elu(x).sum())(x)).all())
+    net = MLP(4, [8], 2)
+    g = mx.grad(lambda x: net(x).sum())(mx.full((3, 4), 500.0))
+    assert bool(mx.isfinite(g).all())
+    assert bool(mx.isfinite(mx.grad(lambda R: so3_log(R).sum())(mx.eye(3))).all())

@@ -97,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     a("--log_dir", type=str, default=os.path.join(REPO, "logs", "run"))
     a("--seed", type=int, default=0)
     a("--resume", type=str, default=None, help="run directory with last/ to continue from")
+    a("--reset_critic", action="store_true", help="--resume: start a fresh critic (and its optimizer); debugging")
     a("--sim_threads", type=int, default=None, help="default: all CPU cores")
     a("--overlap", action=argparse.BooleanOptionalAction, default=False,
       help="XMimic actor | learner: the world-model and policy updates of iteration i run on a GPU stream while the CPU "
@@ -215,8 +216,10 @@ start_it, wall_offset, sim_steps = 0, 0.0, 0
 RESUME_CTRL = None
 if args.resume:
     ck = load_tree(os.path.join(args.resume, "last"))
-    wm.update(unflat(ck["wm"])), pi.update(unflat(ck["pi_live"])), critic.update(unflat(ck["critic"]))
-    for o, k in ((opt_wm, "opt_wm"), (opt_pi, "opt_pi"), (opt_v, "opt_v")):
+    wm.update(unflat(ck["wm"])), pi.update(unflat(ck["pi_live"]))
+    if not args.reset_critic:
+        critic.update(unflat(ck["critic"]))
+    for o, k in ((opt_wm, "opt_wm"), (opt_pi, "opt_pi")) + (() if args.reset_critic else ((opt_v, "opt_v"),)):
         o.state["t"] = ck[k]["t"]
         for sub in ("m", "v", "buf"):
             o.state[sub].update(ck[k].get(sub, {}))
@@ -371,7 +374,8 @@ def _pi_loss_fast(S, o_hist, a_prev, f, xi, xi_n):
     v_boot = critic(_critic_input(S, Fs[HZ], xi_n, G[HZ]))
     J_, c_t, c = actor_objective(r, d, v_boot, args.gamma)
     aux = (mx.stop_gradient(r), mx.stop_gradient(d), mx.stop_gradient(c_t), mx.stop_gradient(c),
-           tuple(mx.stop_gradient(mx.stack([St[i] for St in Ss])) for i in range(6)), Fs[1:], mx.stop_gradient(G[1:]))  # fmt: skip
+           tuple(mx.stop_gradient(mx.stack([St[i] for St in Ss])) for i in range(6)), Fs[1:], mx.stop_gradient(G[1:]),
+           mx.stop_gradient(v_boot))  # fmt: skip
     return -J_.mean(), aux
 
 
@@ -397,7 +401,8 @@ def _pi_loss(S, o_hist, a_prev, f, xi, xi_n):
     v_boot = critic(_critic_input(S, f, xi_n, g))
     J_, c_t, c = actor_objective(r, d, v_boot, args.gamma)
     aux = (mx.stop_gradient(r), mx.stop_gradient(d), mx.stop_gradient(c_t), mx.stop_gradient(c),
-           tuple(mx.stop_gradient(mx.stack([St[i] for St in Ss])) for i in range(6)), mx.stack(Fs), mx.stack(Gs))  # fmt: skip
+           tuple(mx.stop_gradient(mx.stack([St[i] for St in Ss])) for i in range(6)), mx.stack(Fs), mx.stack(Gs),
+           mx.stop_gradient(v_boot))  # fmt: skip
     return -J_.mean(), aux
 
 
@@ -419,8 +424,13 @@ def _policy_update(s, hs, ha, hxi, hf, xi, f, a_prev, lr_pi, lr_v, ema_w):
     xi_n = layout.normalize(xi)
     o_hist = mdp.add_noise(mdp.obs(unflatten_state(hs), ha, hxi, hf))
     (loss, aux), grads = _pi_vg(S, o_hist, a_prev, f, xi, xi_n)
-    r, d, c_t, c, Ss, Fs, Gs = aux
-    grads, gn = clip_grad_norm(flat(grads), 1.0)
+    r, d, c_t, c, Ss, Fs, Gs, v_boot = aux
+    nf = lambda x: (~mx.isfinite(x)).sum().astype(mx.int32)  # noqa: E731
+    gflat = flat(grads)
+    # non-finite counts: loss, rewards, terminations, critic bootstrap, imagined p, R, v, w, q, qd, encoder / decoder grads
+    diag = mx.stack([nf(loss), nf(r), nf(d), nf(v_boot)] + [nf(x) for x in Ss]
+                    + [sum(nf(g) for k, g in gflat.items() if k.startswith(pre)) for pre in ("enc", "dec")])  # fmt: skip
+    grads, gn = clip_grad_norm(gflat, 1.0)
     if args.pi_clip_value > 0:
         grads = clip_grad_value(grads, args.pi_clip_value)
     finite = mx.isfinite(gn)
@@ -438,8 +448,11 @@ def _policy_update(s, hs, ha, hxi, hf, xi, f, a_prev, lr_pi, lr_v, ema_w):
     g_c = mx.concatenate((motion.goal(f, K)[None], Gs), 0).reshape(-1, GOAL_DIM)
     xi_c = mx.broadcast_to(xi_n[None], (HZ + 1,) + xi_n.shape).reshape(-1, xi_n.shape[-1])
     X = mx.stop_gradient(_critic_input(S_c, f_c, xi_c, g_c)).reshape(HZ + 1, B, -1)
-    critic.norm.update(X)
-    targets = mx.stop_gradient(_gae_targets(critic(X), r, d))
+    # a non-finite imagined batch must not reach the critic's normalizer or weights (they would stay NaN for good)
+    ok_c = mx.isfinite(X).all() & mx.isfinite(r).all() & mx.isfinite(d).all()
+    X = mx.where(ok_c, X, 0.0)
+    critic.norm.update(X, ok=ok_c)
+    targets = mx.stop_gradient(_gae_targets(critic(X), mx.where(ok_c, r, 0.0), mx.where(ok_c, d, 0.0)))
     Xf, Yf = X[:-1].reshape(-1, X.shape[-1]), targets.reshape(-1)
     n = Xf.shape[0]
     mb = n // args.critic_minibatches
@@ -449,10 +462,12 @@ def _policy_update(s, hs, ha, hxi, hf, xi, f, a_prev, lr_pi, lr_v, ema_w):
         for i in range(args.critic_minibatches):
             idx = perm[i * mb : (i + 1) * mb]
             v_loss, vg = _v_vg(Xf[idx], Yf[idx])
-            vg, _ = clip_grad_norm(flat(vg), 1.0)
-            critic.update(unflat(opt_v.step(flat(critic.trainable_parameters()), vg, lr_v)))
+            vg, vgn = clip_grad_norm(flat(vg), 1.0)
+            ok_v = ok_c & mx.isfinite(vgn)
+            vg = {k: mx.where(ok_v, g, 0.0) for k, g in vg.items()}
+            critic.update(unflat(opt_v.step(flat(critic.trainable_parameters()), vg, lr_v, ok=ok_v)))
     r_sum = (c_t * r).sum(0)
-    return loss, v_loss, (r_sum / HZ / 0.1).mean(), gn, c.mean()
+    return loss, v_loss, (r_sum / HZ / 0.1).mean(), gn, c.mean(), diag
 
 
 policy_update_c = mx.compile(_policy_update, inputs=STATE, outputs=STATE)
@@ -820,8 +835,12 @@ for it in range(start_it, args.iterations):
         t3 = time.time()
     agg["wm"].append(l), agg["wm8"].append(e8)
     if res is not None:
-        for k, v in zip(("pi", "v", "ir", "gn", "surv"), res):
+        for k, v in zip(("pi", "v", "ir", "gn", "surv"), res[:5]):
             agg[k].append(v)
+        dg = np.array(res[5])
+        if dg.any():
+            names = ("loss", "r", "d", "v_boot", "p", "R", "v", "w", "q", "qd", "g_enc", "g_dec")
+            print(f"[nonfinite] it {it}: " + ", ".join(f"{k} {int(x)}" for k, x in zip(names, dg) if x), flush=True)
     # sequential: collect / world model / policy; --overlap: queue the learner / actor phase / remaining learner wait
     tm["collect"] += t1 - t0
     tm["wm"] += t2 - t1

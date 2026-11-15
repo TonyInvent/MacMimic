@@ -24,13 +24,19 @@ def set_compute_dtype(dt) -> None:
     COMPUTE_DTYPE = dt
 
 
+def elu(x: mx.array) -> mx.array:
+    """ELU with a backward pass that stays finite: nn.elu's untaken branch exp(x) overflows for x > ~88, and its
+    gradient inf * 0 = NaN then poisons every weight gradient. Same forward values."""
+    return mx.where(x > 0, x, mx.exp(mx.minimum(x, 0)) - 1)
+
+
 class MLP(nn.Module):
     def __init__(self, inp: int, hidden: list[int], out: int, act: str = "elu", layer_norm: bool = False):
         super().__init__()
         dims = [inp] + list(hidden)
         self.layers = [nn.Linear(a, b) for a, b in zip(dims[:-1], dims[1:])] + [nn.Linear(dims[-1], out)]
         self.norms = [nn.LayerNorm(h) for h in hidden] if layer_norm else []
-        self.act = nn.elu if act == "elu" else nn.silu
+        self.act = elu if act == "elu" else nn.silu
 
     def __call__(self, x):
         dt = COMPUTE_DTYPE
@@ -67,7 +73,8 @@ class RunningNorm(nn.Module):
         self.max_count, self.eps = max_count, eps
         self.freeze()
 
-    def update(self, x: mx.array):
+    def update(self, x: mx.array, ok: mx.array | None = None):
+        """``ok`` (0-dim bool): apply only where true (a skipped batch leaves the statistics unchanged)."""
         x = mx.stop_gradient(x.reshape(-1, x.shape[-1]).astype(mx.float32))
         n = x.shape[0]
         m, v = x.mean(0), x.var(0)
@@ -76,6 +83,8 @@ class RunningNorm(nn.Module):
         mean = self.mean + delta * n / tot
         var = (self.var * self.count + v * n + delta**2 * self.count * n / tot) / tot
         live = self.count < self.max_count
+        if ok is not None:
+            live = live & ok
         self.mean = mx.where(live, mean, self.mean)
         self.var = mx.where(live, var, self.var)
         self.count = mx.where(live, tot, self.count)

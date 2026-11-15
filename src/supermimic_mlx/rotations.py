@@ -23,7 +23,8 @@ def T(R: mx.array) -> mx.array:
 
 
 def normalize(x: mx.array, eps: float = 1e-12) -> mx.array:
-    return x / mx.maximum(mx.sqrt((x * x).sum(-1, keepdims=True)), eps)
+    # clamp before the square root: sqrt's gradient at an exact zero is inf (and inf * 0 = NaN downstream)
+    return x / mx.sqrt(mx.maximum((x * x).sum(-1, keepdims=True), eps * eps))
 
 
 def quat_to_mat(q: mx.array) -> mx.array:
@@ -101,7 +102,7 @@ def so3_exp(v: mx.array) -> mx.array:
 def quat_to_rotvec(q: mx.array) -> mx.array:
     q = q * mx.where(q[..., :1] < 0, -1.0, 1.0)
     v = q[..., 1:]
-    sin_half = mx.sqrt((v * v).sum(-1, keepdims=True))
+    sin_half = mx.sqrt(mx.maximum((v * v).sum(-1, keepdims=True), 1e-30))  # finite gradient at the identity
     half = mx.arctan2(sin_half, q[..., :1])
     scale = mx.where(sin_half < 1e-6, 2.0 / mx.maximum(q[..., :1], 1e-6), 2 * half / (sin_half + 1e-12))
     return v * scale
