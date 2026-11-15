@@ -206,7 +206,12 @@ class TrackingSim:
         a_np = np.asarray(a, dtype=np.float32)
         s = self.state_flat() if s is None else s
         f, xi, a_prev, ep_step = self.f.copy(), self.xi.copy(), self.a_prev.copy(), self.ep_step.copy()
-        self.ctrl[:] = self.default_q + xi[:, 1 : 1 + self.J] + self.alpha * a_np
+        bad_a = ~np.isfinite(a_np).all(-1)
+        target = self.default_q + xi[:, 1 : 1 + self.J] + self.alpha * a_np
+        if bad_a.any():  # a non-finite action is not handed to MuJoCo (it would zero the forces and warn)
+            target = np.where(bad_a[:, None], self.default_q + xi[:, 1 : 1 + self.J], target)
+        self.ctrl[:] = target
+        qp0, qv0 = self.qpos.copy(), self.qvel.copy()
         t0 = time.perf_counter()
         self.batch.step(nstep=DECIMATION)
         self.t_physics += time.perf_counter() - t0
@@ -214,12 +219,16 @@ class TrackingSim:
         f1 = f + 1
         r, term = self._reward_fn(mx.array(s1), mx.array(f1.astype(np.int32)), mx.array(a_np), mx.array(a_prev))
         r, term = np.array(r, dtype=np.float64), np.array(term)
-        # a non-finite simulator state (diverged world) ends the episode as a failure
-        bad = ~np.isfinite(s1).all(-1)
+        # a diverged world (non-finite state; MuJoCo's auto-reset is off, see scene.apply_options), a non-finite action
+        # or reward ends the episode as a failure; the world is rolled back to its last finite state, so the stored
+        # transition is a standstill and an evaluation world stays frozen (failed) instead of stepping NaNs
+        bad = ~np.isfinite(s1).all(-1) | bad_a | ~np.isfinite(r)
         if bad.any():
             term = term | bad
             r = np.where(bad, 0.0, r)
             s1 = np.where(bad[:, None], s, s1)
+            self.qpos[bad], self.qvel[bad] = qp0[bad], qv0[bad]
+            a_np = np.where(bad_a[:, None], 0.0, a_np).astype(np.float32)
         clip_end = self.motion.clip_end_np[self.motion.clip_id_np[f]]
         timeout = (f1 >= clip_end) | (ep_step + 1 >= self.max_episode_steps)
         done = term | timeout

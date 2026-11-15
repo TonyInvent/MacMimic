@@ -52,9 +52,10 @@ class MLP(nn.Module):
             x = mx.addmm(l.bias.astype(dt), x, l.weight.astype(dt).T)
             if i == len(self.layers) - 1:
                 break
-            if self.norms:
-                x = self.norms[i](x.astype(mx.float32)).astype(dt)
-            x = self.act(x)
+            if self.norms:  # autocast: LayerNorm and the activation after it in fp32, rounded at the next matmul
+                x = self.act(self.norms[i](x.astype(mx.float32))).astype(dt)
+            else:  # autocast: the activation of a bf16 Linear output stays bf16
+                x = self.act(x)
         return x.astype(mx.float32)
 
     def hidden_weight_paths(self, prefix: str) -> list[str]:

@@ -623,6 +623,11 @@ if EPROBE:
         return EP_PI(hist, motion.goal(f, K)), hist
 
     ep_act_c = mx.compile(_ep_act, inputs=[EP_PI.state], outputs=[EP_PI.state])
+    # trace the probe step now, on the main thread before any learner thread runs (--overlap)
+    _s = penv.state_flat()
+    mx.eval(ep_act_c(mx.array(_s), mx.array(penv.a_prev), mx.array(penv.xi), mx.array(penv.f.astype(np.int32)),
+                     mx.zeros((P_EP, Hh, mdp.obs_dim)))[0])  # fmt: skip
+    mx.eval(penv._reward_fn(mx.array(_s), mx.array(penv.f.astype(np.int32) + 1), mx.zeros((P_EP, J)), mx.zeros((P_EP, J))))
 
     def eprobe_begin(it, ema_params):
         m = motion
@@ -652,8 +657,8 @@ if EPROBE:
             penv.done_eval |= penv.f >= EP["stop"]
             penv.f = np.minimum(penv.f, EP["fcap"])
             EP["left"] -= 1
-            if penv.done_eval.all():
-                EP["left"] = 0
+            if penv.done_eval.all() and not args.eprobe_async:  # upstream's eager sweep stops early, its graphed
+                EP["left"] = 0  # (async) sweep always runs lead + tile steps
         if EP["left"] == 0:
             eprobe_finish()
 
@@ -788,12 +793,12 @@ for it in range(start_it, args.iterations):
         collect(n, stats)
         t1 = time.time()
         l, e8 = wm_updates(lr_mx)
-        prof_eval("wm.encode", "wm.gpu", l, e8, STATE if args.profile else ())
+        prof_eval("wm.encode", "wm.gpu", l, e8, STATE)
         t2 = time.time()
         res = None
         if do_pi:
             res = policy_update(lr * pi_mult, lr)
-            prof_eval("pi.encode", "pi.gpu", res, STATE if args.profile else ())
+            prof_eval("pi.encode", "pi.gpu", res, STATE)  # STATE: the EMA would otherwise stay a lazy chain of copies
         t3 = time.time()
     else:
         # XMimic actor | learner: the learner (world model, then policy + critic) of iteration i is queued on its GPU
@@ -812,7 +817,9 @@ for it in range(start_it, args.iterations):
             mx.eval(l_, e8_, res_ if res_ is not None else (), STATE)
             return l_, e8_, res_
 
-        concurrent = it >= start_it + 2  # the first iterations trace and compile both sides one after the other
+        # the first iterations, and the first policy update after --wm_only_iters, trace and compile one side at a time
+        # (MLX's compile cache is not known to be safe to fill from two threads); the probe functions are traced at setup
+        concurrent = it >= start_it + 2 and it != POLICY_START
         mx.eval(STATE, wm_in, pi_in if pi_in is not None else (), lr_mx)  # MLX streams are per thread: hand over materialized arrays
         LEARNER.submit(learner_job)
         if not concurrent:
@@ -863,7 +870,7 @@ for it in range(start_it, args.iterations):
             print(f"--lr_decay_ret: {why} at it {it + 1}: policy LR x{args.pi_lr_mult} -> x1 over {args.lr_decay_len} its", flush=True)
         print(f"it {it + 1} | {wall_h:.3f} h | wm {row[3]:.4f} e8 {row[4]:.4f} | pi {row[5]:.3f} v {row[6]:.4f} imag_r {row[7]:.3f} "
               f"surv {row[9]:.3f} | sim_r {row[10]:.3f} ep_len {row[11]:.1f} ep_ret {row[12]:.3f} term {term_frac:.2f} | "
-              f"{ips:.2f} it/s (collect {row[-3]:.0f} wm {row[-2]:.0f} pi {row[-1]:.0f} ms) | gpu peak {mx.get_peak_memory() / 2**30:.1f} GB",
+              f"{ips:.2f} it/s (collect {row[-3]:.0f} wm {row[-2]:.0f} pi {row[-1]:.0f} ms) | gpu peak {mx.get_peak_memory() / 2**30:.1f} GB, active {mx.get_active_memory() / 2**30:.1f} GB",
               flush=True)  # fmt: skip
         if args.profile and PROF:
             print("  profile (ms / iteration): " + ", ".join(f"{k} {v / args.log_every:.1f}" for k, v in sorted(PROF.items())), flush=True)

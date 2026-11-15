@@ -61,6 +61,9 @@ def apply_options(m: mujoco.MjModel) -> None:
     o.ccd_iterations = 35
     o.impratio = 1.0
     o.gravity[:] = (0.0, 0.0, -9.81)
+    # MuJoCo Warp (upstream) has no auto-reset: a diverged world must stay visibly non-finite (sim.step_core ends its
+    # episode) instead of being silently reset to qpos0 mid-step and stored as a teleport transition
+    o.disableflags |= mujoco.mjtDisableBit.mjDSBL_AUTORESET
 
 
 def build_model(visual: bool = False) -> mujoco.MjModel:
