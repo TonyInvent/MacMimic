@@ -80,6 +80,7 @@ class MDP:
         self.obs_noise = mx.array(np.concatenate((np.full(J, n["joint_pos"]), np.full(J, n["joint_vel"]), np.full(3, n["ang_vel"]),
                                                   np.full(3, n["gravity"]), np.zeros(J), np.full(6, n["ref_ori"]))).astype(np.float32))  # fmt: skip
         self.feet: list[int] = [list(g1.TRACKED_BODIES).index(b) for b in g1.FEET]
+        mx.eval(self.default_q, self.soft_lo, self.soft_hi, self.obs_noise)  # materialized: usable from any thread's stream
 
     # ---------------- observation ----------------
     def obs(self, S, a_prev, xi, f) -> mx.array:

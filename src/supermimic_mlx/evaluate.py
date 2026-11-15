@@ -20,6 +20,7 @@ import time
 import mlx.core as mx
 import numpy as np
 
+from . import networks
 from .checkpoint import load_tree
 from .kinematics import Kinematics
 from .mdp import MAX_STEP_REWARD, MDP, unflatten_state
@@ -45,6 +46,7 @@ class Evaluator:
         m, env, N = self.motion, self.env, self.N
         a_ = ck["meta"]["args"]
         K, Hh = a_["goal_frames"], a_["hist"]
+        networks.set_compute_dtype(mx.bfloat16 if a_.get("precision") == "bf16" else None)  # as trained (upstream: AMP)
         pi = policy_from_args(a_, self.mdp.obs_dim, m.goal_dim(K), len(g1.JOINT_NAMES))
         pi.update(unflat(ck["pi"]))
 

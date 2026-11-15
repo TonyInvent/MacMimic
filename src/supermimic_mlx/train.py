@@ -30,12 +30,12 @@ PRESETS = {
                        lr_decay_ret=0.75, lr_decay_len=300, iterations=3500, ckpt_every=100, eprobe_async=20,
                        eprobe_start=1000, eprobe_every=125, eprobe_decay=0.7, lr_decay_by=1400),
     # InstantTrack (upstream PRESET[instanttrack])
-    "xmimic": {},  # filled below: blinkmimic + overlap + fast_learner
+    "xmimic": {},  # filled below: blinkmimic + overlap
     "instanttrack": dict(pi_ema=0.995, lr=4e-4, wm_batches=5, wm_hidden="1024,1024,1024", fail_reset=0.3, contact_reward=0.25),
 }
 
 
-PRESETS["xmimic"] = dict(PRESETS["blinkmimic"], overlap=True, fast_learner=True)
+PRESETS["xmimic"] = dict(PRESETS["blinkmimic"], overlap=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,15 +97,18 @@ def build_parser() -> argparse.ArgumentParser:
     a("--log_dir", type=str, default=os.path.join(REPO, "logs", "run"))
     a("--seed", type=int, default=0)
     a("--resume", type=str, default=None, help="run directory with last/ to continue from")
-    a("--sim_threads", type=int, default=None)
+    a("--sim_threads", type=int, default=None, help="default: all CPU cores")
     a("--overlap", action=argparse.BooleanOptionalAction, default=False,
       help="XMimic actor | learner: the world-model and policy updates of iteration i run on a GPU stream while the CPU "
            "simulator collects (and the probe sweep advances) with the policy and normalizers of iteration i - 1")
     a("--fast_learner", action=argparse.BooleanOptionalAction, default=False,
       help="XMimic's learner hoisting: frames, goals and goal encodings of all imagined steps in one batch before the "
            "rollout; the windows of all world-model batches sampled at once and their updates in one compiled call")
+    a("--precision", type=str, default="auto", choices=["fp32", "bf16", "auto"],
+      help="MLP matmul precision (upstream autocasts to bf16); auto: measured on this GPU at startup")
+    a("--profile", action="store_true", help="print a per-phase timing breakdown (adds synchronizations)")
     a("--checkpoint_bptt", action=argparse.BooleanOptionalAction, default=None,
-      help="recompute each imagined step in the backward pass (saves memory; default: on for --pi_batch > 4096)")
+      help="recompute each imagined step in the backward pass (saves memory; default: automatic from the GPU memory)")
     return p
 
 
@@ -128,16 +131,52 @@ from supermimic_mlx.kinematics import Kinematics  # noqa: E402
 from supermimic_mlx.mdp import MAX_STEP_REWARD, MDP, flatten_state, inv_dim, unflatten_state  # noqa: E402
 from supermimic_mlx.mirror import Mirror  # noqa: E402
 from supermimic_mlx.motion import MotionLib  # noqa: E402
+from supermimic_mlx import networks  # noqa: E402
 from supermimic_mlx.networks import Critic, WorldModel, policy_from_args, state_error  # noqa: E402
 from supermimic_mlx.optim import MuonAdam, clip_grad_norm, clip_grad_value, flat, unflat  # noqa: E402
 from supermimic_mlx.robots import g1  # noqa: E402
 from supermimic_mlx.scene import CONTROL_DT  # noqa: E402
 from supermimic_mlx.sim import TrackingSim, XiLayout  # noqa: E402
 
+PROF: dict = {}
+
+
+class prof:
+    """--profile: accumulate wall-clock of a block (ms) under a name; ``sync`` evaluates these arrays inside it."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.t = time.perf_counter()
+
+    def __exit__(self, *a):
+        PROF[self.name] = PROF.get(self.name, 0.0) + 1000 * (time.perf_counter() - self.t)
+
+
+def prof_eval(name_encode, name_wait, *xs):
+    """Evaluate xs; with --profile split into the encode (async_eval returns) and the GPU wait."""
+    if not args.profile:
+        mx.eval(*xs)
+        return
+    with prof(name_encode):
+        mx.async_eval(*xs)
+    with prof(name_wait):
+        mx.eval(*xs)
+
+
+from supermimic_mlx import hw  # noqa: E402
+
+HW = hw.configure(args)  # automatic systems settings for this Mac (threads, precision, checkpointing, wired memory)
+print("[hw] " + ", ".join(f"{k} {v}" for k, v in HW.items() if k in ("chip", "p_cores", "e_cores", "gpu_cores", "memory_gb",
+      "working_set_gb", "tflops_fp32", "tflops_bf16", "buffer_gb", "learner_peak_est_gb")), flush=True)  # fmt: skip
+print(f"[hw] sim_threads {args.sim_threads}, precision {args.precision}, checkpoint_bptt {args.checkpoint_bptt}", flush=True)
+if args.precision == "bf16":
+    networks.set_compute_dtype(mx.bfloat16)
 mx.random.seed(args.seed)
 np.random.seed(args.seed)
 os.makedirs(args.log_dir, exist_ok=True)
-json.dump(vars(args), open(os.path.join(args.log_dir, "args.json"), "w"), indent=2)
+json.dump(dict(vars(args), hw=HW), open(os.path.join(args.log_dir, "args.json"), "w"), indent=2)
 print("args:", json.dumps(vars(args)), flush=True)
 
 J = len(g1.JOINT_NAMES)
@@ -152,12 +191,12 @@ FEET = mdp.feet
 if args.ref_contact_fix:
     motion.set_ref_contact(FEET)
 widths = lambda s: tuple(int(x) for x in s.split(","))  # noqa: E731
-CKPT_BPTT = args.checkpoint_bptt if args.checkpoint_bptt is not None else args.pi_batch > 4096
+CKPT_BPTT = bool(args.checkpoint_bptt)
 
 wm = WorldModel(J, layout.dim, hidden=widths(args.wm_hidden), structured=args.wm_structured, dt=CONTROL_DT)
 pi = policy_from_args(vars(args), mdp.obs_dim, GOAL_DIM, J)
 critic = Critic(CRITIC_IN)
-mx.eval(wm.parameters(), pi.parameters(), critic.parameters())
+mx.eval(wm.parameters(), pi.parameters(), critic.parameters(), ERR_FLOOR if "ERR_FLOOR" in globals() else ())
 opt_wm = MuonAdam(flat(wm.trainable_parameters()), wm.muon_paths() if args.wm_opt == "muon" else (), betas=(0.9, 0.999))
 opt_pi = MuonAdam(flat(pi.trainable_parameters()), pi.muon_paths() if args.pi_opt == "muon" else (), betas=(args.pi_beta1, 0.95))
 opt_v = MuonAdam(flat(critic.trainable_parameters()), (), betas=(0.9, 0.999))
@@ -250,19 +289,31 @@ def _wm_update_all(s, s1, a, xi, mask, lr):
 wm_update_all_c = mx.compile(_wm_update_all, inputs=STATE, outputs=STATE)
 
 
-def wm_update(lr):
-    w = buffer.sample_windows(args.wm_batch, args.wm_window)
-    return wm_update_c(*(mx.array(w[k]) for k in ("s", "s1", "a", "xi", "mask")), lr)
+def wm_inputs() -> list:
+    """Host side of the world-model updates: the sampled windows of each batch (one list per compiled call)."""
+    keys = ("s", "s1", "a", "xi", "mask")
+    if args.fast_learner:
+        with prof("wm.sample"):
+            w = buffer.sample_windows(args.wm_batch * args.wm_batches, args.wm_window)
+        return [[mx.array(w[k]) for k in keys]]
+    out = []
+    with prof("wm.sample"):
+        for _ in range(args.wm_batches):
+            w = buffer.sample_windows(args.wm_batch, args.wm_window)
+            out.append([mx.array(w[k]) for k in keys])
+    return out
+
+
+def wm_run(inputs: list, lr):
+    """The world-model updates of an iteration on sampled windows; returns the last (loss, 8-step error)."""
+    fn = wm_update_all_c if args.fast_learner else wm_update_c
+    for xs in inputs:
+        out = fn(*xs, lr)
+    return out
 
 
 def wm_updates(lr):
-    """The wm_batches world-model updates of an iteration; returns the last (loss, 8-step error)."""
-    if args.fast_learner:
-        w = buffer.sample_windows(args.wm_batch * args.wm_batches, args.wm_window)
-        return wm_update_all_c(*(mx.array(w[k]) for k in ("s", "s1", "a", "xi", "mask")), lr)
-    for _ in range(args.wm_batches):
-        out = wm_update(lr)
-    return out
+    return wm_run(wm_inputs(), lr)
 
 
 # ------------------------------------------------------------------------------------------------ policy update
@@ -416,15 +467,25 @@ def sample_valid_starts(B: int):
     return {k: v[idx] for k, v in s.items()}, {k: v[idx] for k, v in h.items()}
 
 
-def policy_update(lr_pi, lr_v):
-    s, h = sample_valid_starts(args.pi_batch)
+def pi_inputs(lr_pi, lr_v):
+    """Host side of the policy update: sampled starts and histories, learning rates, the EMA weight."""
+    with prof("pi.sample"):
+        s, h = sample_valid_starts(args.pi_batch)
     ema_w = 0.0
     if EMA is not None:
         ema_w = 1.0 if EMA["n"] == 0 else 1.0 - args.pi_ema  # AveragedModel: the first update copies
         EMA["n"] += 1
-    return policy_update_c(mx.array(s["s"]), mx.array(h["s"]), mx.array(h["a_prev"]), mx.array(h["xi"]), mx.array(h["f"]),
-                           mx.array(s["xi"]), mx.array(s["f"]), mx.array(s["a_prev"]), mx.array(lr_pi), mx.array(lr_v),
-                           mx.array(ema_w, dtype=mx.float32))  # fmt: skip
+    with prof("pi.to_mx"):
+        xs = (mx.array(s["s"]), mx.array(h["s"]), mx.array(h["a_prev"]), mx.array(h["xi"]), mx.array(h["f"]),
+              mx.array(s["xi"]), mx.array(s["f"]), mx.array(s["a_prev"]), mx.array(lr_pi), mx.array(lr_v),
+              mx.array(ema_w, dtype=mx.float32))  # fmt: skip
+    return xs
+
+
+def policy_update(lr_pi, lr_v):
+    xs = pi_inputs(lr_pi, lr_v)
+    with prof("pi.build"):
+        return policy_update_c(*xs)
 
 
 # ------------------------------------------------------------------------------------------------ collection
@@ -436,8 +497,6 @@ buffer = ReplayBuffer(args.buffer_steps, args.num_envs, J, layout.dim, seed=args
 OBS_HIST = {"h": mx.zeros((args.num_envs, Hh, mdp.obs_dim))}
 ACT_PI = policy_from_args(vars(args), mdp.obs_dim, GOAL_DIM, J) if args.overlap else None  # --overlap: the actor's snapshot
 ACT_KEY = {"k": mx.random.key(args.seed + 1)}
-S_LEARN = mx.new_stream(mx.gpu) if args.overlap else None
-S_ACT = mx.new_stream(mx.gpu) if args.overlap else None
 
 
 def _obs_goal(s, a_prev, xi, f, fresh, hist, key):
@@ -497,19 +556,23 @@ def collect(n_steps: int, stats: dict, deferred: list | None = None):
         s = env.state_flat()
         args_ = (mx.array(s), mx.array(env.a_prev), mx.array(env.xi), mx.array(env.f.astype(np.int32)), mx.array(env.ep_step == 0),
                  OBS_HIST["h"], *_keys())  # fmt: skip
-        if deferred is None:
-            a, OBS_HIST["h"] = act_c(*args_)
-        else:
-            a, OBS_HIST["h"], o, g = act_snap_c(*args_)
-        a = np.array(a)
-        out = env.step_core(a, s)
+        with prof("col.act"):
+            if deferred is None:
+                a, OBS_HIST["h"] = act_c(*args_)
+            else:
+                a, OBS_HIST["h"], o, g = act_snap_c(*args_)
+            a = np.array(a)
+        with prof("col.step"):
+            out = env.step_core(a, s)
         tr = (mx.array(out["s"]), mx.array(out["s1"]), mx.array(out["a"]), mx.array(out["xi"]))
         if deferred is None:
             wm_norms_c(*tr)
         else:
             deferred.append(((o, g), tr))
-        buffer.add(out)
-        out = env.step_tail(out)
+        with prof("col.buffer"):
+            buffer.add(out)
+        with prof("col.tail"):
+            out = env.step_tail(out)
         sim_steps += args.num_envs
         stats["r"].append(out["r"].mean() / 0.1)
         if "ep_len" in out:
@@ -620,6 +683,48 @@ def save_ckpt(it: int, wall: float, full: bool):
         save_tree(os.path.join(args.log_dir, "last"), tree)
 
 
+class LearnerThread:
+    """--overlap: a worker thread that owns a GPU stream (MLX streams are per thread) and runs one learner job at a time;
+    MLX releases the GIL while it evaluates, so the main thread steps the CPU simulator meanwhile."""
+
+    def __init__(self):
+        import queue
+        import threading
+
+        self.jobs, self.results = queue.Queue(), queue.Queue()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+        self.pending = None
+
+    def _run(self):
+        stream = mx.new_stream(mx.gpu)
+        while True:
+            fn = self.jobs.get()
+            if fn is None:
+                return
+            try:
+                with mx.stream(stream):
+                    self.results.put(("ok", fn()))
+            except BaseException as e:  # re-raised in the main thread
+                self.results.put(("err", e))
+
+    def submit(self, fn):
+        self.jobs.put(fn)
+        self.pending = None
+
+    def wait_idle(self):
+        self.pending = self.results.get()
+
+    def result(self):
+        kind, val = self.pending if self.pending is not None else self.results.get()
+        self.pending = None
+        if kind == "err":
+            raise val
+        return val
+
+
+LEARNER = LearnerThread() if args.overlap else None
+
 # ------------------------------------------------------------------------------------------------ main loop
 stats = {"r": [], "ep_len": [], "ep_ret": [], "term": [], "done": []}
 t_c = time.time()
@@ -668,12 +773,12 @@ for it in range(start_it, args.iterations):
         collect(n, stats)
         t1 = time.time()
         l, e8 = wm_updates(lr_mx)
-        mx.eval(l, e8)
+        prof_eval("wm.encode", "wm.gpu", l, e8, STATE if args.profile else ())
         t2 = time.time()
         res = None
         if do_pi:
             res = policy_update(lr * pi_mult, lr)
-            mx.eval(res)
+            prof_eval("pi.encode", "pi.gpu", res, STATE if args.profile else ())
         t3 = time.time()
     else:
         # XMimic actor | learner: the learner (world model, then policy + critic) of iteration i is queued on its GPU
@@ -683,25 +788,35 @@ for it in range(start_it, args.iterations):
         snap = flat(pi.parameters())
         ACT_PI.update(unflat(snap))
         ema_snap = dict(EMA["p"]) if EMA is not None else None
-        with mx.stream(S_LEARN):
-            l, e8 = wm_updates(lr_mx)
-            res = policy_update(lr * pi_mult, lr) if do_pi else None
-            mx.async_eval(l, e8, res if res is not None else (), STATE)
+        wm_in = wm_inputs()  # sampled now: the actor overwrites the oldest buffer rows while the learner runs
+        pi_in = pi_inputs(lr * pi_mult, lr) if do_pi else None
+
+        def learner_job(wm_in=wm_in, pi_in=pi_in, lr_mx=lr_mx):
+            l_, e8_ = wm_run(wm_in, lr_mx)
+            res_ = policy_update_c(*pi_in) if pi_in is not None else None
+            mx.eval(l_, e8_, res_ if res_ is not None else (), STATE)
+            return l_, e8_, res_
+
+        concurrent = it >= start_it + 2  # the first iterations trace and compile both sides one after the other
+        mx.eval(STATE, wm_in, pi_in if pi_in is not None else (), lr_mx)  # MLX streams are per thread: hand over materialized arrays
+        LEARNER.submit(learner_job)
+        if not concurrent:
+            LEARNER.wait_idle()
         t1 = time.time()
         deferred = []
-        with mx.stream(S_ACT):
-            if EPROBE:
-                if EP and args.eprobe_async:
-                    eprobe_steps(args.eprobe_async)
-                if it >= args.eprobe_start and it % args.eprobe_every == 0:
-                    assert not EP, "--eprobe_async too small: the previous sweep has not finished"
-                    eprobe_begin(it, ema_snap)
-                    if not args.eprobe_async:
-                        eprobe_steps(EP["left"])
-            collect(n, stats, deferred)
+        if EPROBE:
+            if EP and args.eprobe_async:
+                eprobe_steps(args.eprobe_async)
+            if it >= args.eprobe_start and it % args.eprobe_every == 0:
+                assert not EP, "--eprobe_async too small: the previous sweep has not finished"
+                eprobe_begin(it, ema_snap)
+                if not args.eprobe_async:
+                    eprobe_steps(EP["left"])
+        collect(n, stats, deferred)
         t2 = time.time()
-        mx.eval(l, e8, res if res is not None else ())
+        l, e8, res = LEARNER.result()
         apply_deferred(deferred)
+        mx.eval(STATE)
         t3 = time.time()
     agg["wm"].append(l), agg["wm8"].append(e8)
     if res is not None:
@@ -731,6 +846,9 @@ for it in range(start_it, args.iterations):
               f"surv {row[9]:.3f} | sim_r {row[10]:.3f} ep_len {row[11]:.1f} ep_ret {row[12]:.3f} term {term_frac:.2f} | "
               f"{ips:.2f} it/s (collect {row[-3]:.0f} wm {row[-2]:.0f} pi {row[-1]:.0f} ms) | gpu peak {mx.get_peak_memory() / 2**30:.1f} GB",
               flush=True)  # fmt: skip
+        if args.profile and PROF:
+            print("  profile (ms / iteration): " + ", ".join(f"{k} {v / args.log_every:.1f}" for k, v in sorted(PROF.items())), flush=True)
+            PROF.clear()
         stats = {k: [] for k in stats}
         agg = {k: [] for k in agg}
         tm = {k: 0.0 for k in tm}

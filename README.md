@@ -1,6 +1,6 @@
 # supermimic-mlx
 
-**SuperMimic and BlinkMimic on Apple silicon** — whole-body motion tracking for the Unitree G1 with one differentiable
+**SuperMimic, BlinkMimic and XMimic on Apple silicon** — whole-body motion tracking for the Unitree G1 with one differentiable
 world model, trained end to end on a Mac (MLX on the GPU, MuJoCo on the CPU). No CUDA, no PyTorch.
 
 This is a port of [BlinkMimic](https://github.com/fuyichen0725/blinkmimic) (which contains a faithful SuperMimic
@@ -18,6 +18,31 @@ Both methods share simulator, MDP, reward and evaluator, as upstream:
 - `--preset blinkmimic` — BlinkMimic: upstream `PRESET[main]` (structured semi-implicit world model, mirror
   augmentation, Muon on policy and world model, policy EMA, reference-action skip, contact reward, failure- and
   evaluation-guided resets, policy batch 2048 with a decaying 4× policy LR, 3500 iterations).
+- `--preset xmimic` — [XMimic](https://github.com/nico-bohlinger/xmimic): BlinkMimic's algorithm and hyperparameters with
+  XMimic's actor | learner split mapped onto one Mac: the learner (world model, policy, critic) runs from a worker thread
+  on its own GPU stream while the main thread steps the CPU simulator and the probe sweeps with the policy of the
+  previous iteration (XMimic's one-iteration staleness).
+
+## Automatic configuration per Mac
+
+`supermimic_mlx/hw.py` detects the chip (M1 … M6, base / Pro / Max / Ultra), its cores and GPU memory at startup and
+sets what only affects speed and memory: simulator threads (all cores), MLP matmul precision (`--precision auto`:
+bf16, upstream's autocast, wherever a short micro-benchmark shows this GPU runs it at least as fast as fp32 — M1/M2
+emulate bf16 and get fp32), BPTT checkpointing when the estimated learner peak plus the 3.6 GB replay buffer would not
+fit the GPU's working set, and MLX's wired-memory limit. The choices are printed (`[hw] ...`) and stored in `args.json`.
+Every setting can be forced by its flag (`--sim_threads`, `--precision`, `--checkpoint_bptt`).
+
+Measured on an M4 Pro (14 CPU cores, 48 GB), BlinkMimic's algorithm, 4096 worlds:
+
+| | it/s | 3500 iterations | GPU peak |
+|---|---|---|---|
+| fp32 | 0.57 | 102 min | 9.2 GB |
+| `blinkmimic` (auto: bf16) | 0.65 | 90 min | 6.4 GB |
+| `xmimic` (auto: bf16 + actor \| learner) | 0.72 | 81 min | 6.5 GB |
+
+The learner is GPU-compute bound (the BPTT forward runs at ~5.7 TFLOPS, ~70 % of the bf16 matmul peak overall), so the
+remaining time is the algorithm's arithmetic; `--profile` prints a per-phase breakdown, `tools/bench_learner.py` times
+the pieces of the policy update.
 
 ## Setup
 
@@ -37,7 +62,9 @@ uv run --with mjlab python tools/build_scene_mjlab.py
 
 ```bash
 bash scripts/train.sh blinkmimic logs/blinkmimic_s0 --seed 0     # 3500 iterations
+bash scripts/train.sh xmimic logs/xmimic_s0 --seed 0
 bash scripts/train.sh supermimic logs/supermimic_s0 --seed 0 --iterations 16000
+bash scripts/benchmark.sh logs/bench                              # all three, then evaluation and time to target
 uv run python -m supermimic_mlx.evaluate --run_dir logs/blinkmimic_s0          # every checkpoint -> eval.csv
 uv run python tools/time_to_target.py logs/blinkmimic_s0                       # minutes to return >= 0.82
 uv run python tools/render.py --ckpt logs/blinkmimic_s0/ckpt_003500 --clip fallAndGetUp1_subject1 --out fall.mp4
@@ -65,10 +92,14 @@ See [RESULTS.md](RESULTS.md).
   counterpart (mx.compile covers the fusion). Their random-stream changes do not apply; the masked reset is the eager
   reset. `--eprobe_async` keeps its semantics (the sweep advances this many steps per iteration with a snapshot of the
   EMA policy taken when it starts, and its failures apply when it ends), run inline.
-- **Precision.** fp32 throughout (upstream autocasts the MLP matmuls to bf16; bf16 is barely faster on the M4 GPU).
-  Muon's Newton-Schulz iteration also runs in fp32.
-- **Memory.** `--checkpoint_bptt` recomputes each imagined step in the backward pass; it is off by default (the
-  SuperMimic policy batch of 4096 needs ~22 GB without it).
+- **Precision.** MLP matmuls in bf16 with fp32 master weights, LayerNorm, heads and losses in fp32 (upstream's
+  autocast), or fp32 on GPUs without fast bf16. Muon's Newton-Schulz iteration runs in fp32 (torch: bf16).
+- **Memory.** `--checkpoint_bptt` recomputes each imagined step in the backward pass; chosen automatically from the
+  GPU memory (the SuperMimic policy batch of 4096 needs ~15 GB in bf16 without it).
+- **XMimic.** Its JAX/XLA engineering (whole iterations as one XLA program, multi-GPU layouts, bf16 kernels) is
+  CUDA-specific; what carries over to one Mac is the actor | learner overlap. Its "fast learner" hoisting is available as
+  `--fast_learner` but is slower under MLX (one large batched goal encoding compiles worse than the per-step one), so the
+  preset leaves it off. XMimic's 256 constraint rows per world do not apply (CPU MuJoCo allocates per world as needed).
 
 ## Layout
 

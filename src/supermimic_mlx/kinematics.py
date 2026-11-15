@@ -64,6 +64,7 @@ class Kinematics:
                 need.add(i)
                 i = parent[i]
         self.needed = sorted(need)
+        mx.eval(self.axes, self.off_p, self.off_R, self.q_lo, self.q_hi)  # materialized: usable from any thread's stream
 
     def forward(self, p, R, v, w, q, qd, all_bodies: bool = False):
         """Tracked-body world positions (..., nb, 3), rotations (..., nb, 3, 3), link-origin linear and angular

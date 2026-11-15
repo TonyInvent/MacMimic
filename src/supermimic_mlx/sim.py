@@ -11,6 +11,7 @@ Appendix D.1).
 from __future__ import annotations
 
 import os
+import time
 
 import mlx.core as mx
 import mujoco
@@ -109,6 +110,7 @@ class TrackingSim:
         self.done_eval = np.zeros(N, bool)
         self.failed_eval = np.zeros(N, bool)
         self._reward_fn = mx.compile(self._reward_term)
+        self.t_physics = 0.0  # accumulated seconds in batch.step (profiling)
         self.reset(np.arange(N))
 
     # ------------------------------------------------------------------ state
@@ -205,7 +207,9 @@ class TrackingSim:
         s = self.state_flat() if s is None else s
         f, xi, a_prev, ep_step = self.f.copy(), self.xi.copy(), self.a_prev.copy(), self.ep_step.copy()
         self.ctrl[:] = self.default_q + xi[:, 1 : 1 + self.J] + self.alpha * a_np
+        t0 = time.perf_counter()
         self.batch.step(nstep=DECIMATION)
+        self.t_physics += time.perf_counter() - t0
         s1 = self.state_flat()
         f1 = f + 1
         r, term = self._reward_fn(mx.array(s1), mx.array(f1.astype(np.int32)), mx.array(a_np), mx.array(a_prev))

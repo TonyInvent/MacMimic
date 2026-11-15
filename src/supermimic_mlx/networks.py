@@ -13,6 +13,17 @@ from .mdp import inv_dim, invariant_features
 from .rotations import mm3, mv3, so3_exp, so3_log, yaw_mat, T
 
 
+# Mixed precision of the MLP matmuls (upstream's torch.autocast bf16): None = fp32. Weights stay fp32 (the optimizer's
+# master copy) and are cast per call; LayerNorm runs in fp32; MLP outputs return to fp32, so state integration, FK,
+# rewards and losses are fp32.
+COMPUTE_DTYPE = None
+
+
+def set_compute_dtype(dt) -> None:
+    global COMPUTE_DTYPE
+    COMPUTE_DTYPE = dt
+
+
 class MLP(nn.Module):
     def __init__(self, inp: int, hidden: list[int], out: int, act: str = "elu", layer_norm: bool = False):
         super().__init__()
@@ -22,12 +33,23 @@ class MLP(nn.Module):
         self.act = nn.elu if act == "elu" else nn.silu
 
     def __call__(self, x):
-        for i, l in enumerate(self.layers[:-1]):
-            x = l(x)
+        dt = COMPUTE_DTYPE
+        if dt is None:
+            for i, l in enumerate(self.layers[:-1]):
+                x = l(x)
+                if self.norms:
+                    x = self.norms[i](x)
+                x = self.act(x)
+            return self.layers[-1](x)
+        x = x.astype(dt)
+        for i, l in enumerate(self.layers):
+            x = mx.addmm(l.bias.astype(dt), x, l.weight.astype(dt).T)
+            if i == len(self.layers) - 1:
+                break
             if self.norms:
-                x = self.norms[i](x)
+                x = self.norms[i](x.astype(mx.float32)).astype(dt)
             x = self.act(x)
-        return self.layers[-1](x)
+        return x.astype(mx.float32)
 
     def hidden_weight_paths(self, prefix: str) -> list[str]:
         """Paths of the hidden weight matrices (all Linear layers but the first and the last): Muon's parameters."""
