@@ -32,7 +32,7 @@ from .sim import TrackingSim, XiLayout
 
 
 class Evaluator:
-    def __init__(self, nthread: int | None = None, clips: list[str] | None = None):
+    def __init__(self, nthread: int | None = None, clips: list[str] | None = None, backend: str = "mujoco"):
         self.kin = Kinematics()
         self.motion = MotionLib.from_dir(g1.MOTION_DIR, self.kin, g1.load_motion)
         self.layout = XiLayout()
@@ -40,7 +40,7 @@ class Evaluator:
         m = self.motion
         self.clips = np.arange(len(m.names)) if clips is None else np.array([m.names.index(c) for c in clips])
         self.N = len(self.clips)
-        self.env = TrackingSim(self.N, m, self.mdp, self.layout, eval_mode=True, nthread=nthread)
+        self.env = TrackingSim(self.N, m, self.mdp, self.layout, eval_mode=True, nthread=nthread, backend=backend)
 
     def evaluate(self, ck: dict, record: str | None = None) -> dict:
         m, env, N = self.motion, self.env, self.N
@@ -95,6 +95,78 @@ class Evaluator:
         return res
 
 
+class BatchEvaluator:
+    """G checkpoints evaluated at once: one simulator of 40 G worlds (CPU MuJoCo is deterministic per world, so each
+    slice gives the result of evaluating its checkpoint alone), one compiled step running every policy on its slice.
+    The policies' parameters are compile inputs: a new group of checkpoints does not recompile."""
+
+    def __init__(self, G: int, nthread: int | None = None, backend: str = "mujoco"):
+        self.G = G
+        self.kin = Kinematics()
+        self.motion = MotionLib.from_dir(g1.MOTION_DIR, self.kin, g1.load_motion)
+        self.layout = XiLayout()
+        self.mdp = MDP(self.kin, self.motion, self.layout.dim)
+        self.C = len(self.motion.names)
+        self.env = TrackingSim(self.C * G, self.motion, self.mdp, self.layout, eval_mode=True, nthread=nthread, backend=backend)
+        self.pis, self.act_c, self.sig = None, None, None
+
+    def _setup(self, a_: dict):
+        sig = tuple(a_.get(k) for k in ("goal_frames", "hist", "enc_hidden", "dec_hidden", "pi_ref_skip", "precision"))
+        if sig == self.sig:
+            return
+        self.sig = sig
+        networks.set_compute_dtype(mx.bfloat16 if a_.get("precision") == "bf16" else None)
+        m, C, K = self.motion, self.C, a_["goal_frames"]
+        self.pis = [policy_from_args(a_, self.mdp.obs_dim, m.goal_dim(K), len(g1.JOINT_NAMES)) for _ in range(self.G)]
+
+        def act(s, a_prev, xi, f, hist):
+            o = self.mdp.obs(unflatten_state(s), a_prev, xi, f)
+            hist = mx.concatenate((hist[:, 1:], o[:, None]), 1)
+            g = m.goal(f, K)
+            return mx.concatenate([pi(hist[i * C : (i + 1) * C], g[i * C : (i + 1) * C]) for i, pi in enumerate(self.pis)]), hist
+
+        self.act_c = mx.compile(act, inputs=[pi.state for pi in self.pis])
+
+    def evaluate(self, cks: list[dict]) -> list[dict]:
+        assert 0 < len(cks) <= self.G
+        m, env, C, G = self.motion, self.env, self.C, self.G
+        a_ = cks[0]["meta"]["args"]
+        self._setup(a_)
+        for i in range(G):  # unused slots replay the last checkpoint (results dropped)
+            self.pis[i].update(unflat(cks[min(i, len(cks) - 1)]["pi"]))
+        N = C * G
+        clip_of = np.arange(N) % C
+        env.done_eval[:] = False
+        env.failed_eval[:] = False
+        env.reset(np.arange(N), m.clip_start_np[clip_of].copy())
+        clip_end = m.clip_end_np[clip_of]
+        ret = np.zeros(N)
+        s = env.state_flat()
+        o0 = self.mdp.obs(unflatten_state(mx.array(s)), mx.array(env.a_prev), mx.array(env.xi), mx.array(env.f.astype(np.int32)))
+        hist = mx.broadcast_to(o0[:, None], (N, a_["hist"], o0.shape[-1]))
+        while not env.done_eval.all():
+            s = env.state_flat()
+            a, hist = self.act_c(mx.array(s), mx.array(env.a_prev), mx.array(env.xi), mx.array(env.f.astype(np.int32)), hist)
+            alive = ~env.done_eval.copy()
+            out = env.step(np.array(a))
+            ret += np.where(alive, out["r"], 0.0)
+            env.f = np.minimum(env.f, clip_end - 1)
+        clip_len = m.clip_len_np[clip_of]
+        res = []
+        for i in range(len(cks)):
+            sl = slice(i * C, (i + 1) * C)
+            norm = ret[sl] / ((clip_len[sl] - 1) * MAX_STEP_REWARD)
+            failed = env.failed_eval[sl]
+            res.append({
+                "norm_return": float(norm.mean()),
+                "norm_return_framew": float(ret[sl].sum() / ((clip_len[sl] - 1).sum() * MAX_STEP_REWARD)),
+                "n_failed": int(failed.sum()),
+                "failed": [m.names[c] for c in np.nonzero(failed)[0]],
+                "per_clip": {m.names[c]: round(float(norm[c]), 4) for c in range(C)},
+            })  # fmt: skip
+        return res
+
+
 def ckpt_paths(run_dir: str) -> list[str]:
     return sorted(p.removesuffix(".safetensors") for p in glob.glob(os.path.join(run_dir, "ckpt_*.safetensors")))
 
@@ -107,13 +179,22 @@ def main():
     p.add_argument("--every", type=int, default=1, help="evaluate every n-th checkpoint")
     p.add_argument("--record", type=str, default=None)
     p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--sim_backend", type=str, default="mujoco", choices=["mujoco", "superdex"],
+                   help="simulator to evaluate in (superdex: cross-simulator evaluation; --threads worker processes)")
+    p.add_argument("--clips", type=str, default=None, help="comma-separated clip names (default: all 40)")
+    p.add_argument("--out", type=str, default="eval.csv", help="result file in the run directory")
+    p.add_argument("--batch", type=int, default=1, help="evaluate this many checkpoints at once (all 40 clips each)")
+    p.add_argument("--min_it", type=int, default=0, help="only checkpoints from this iteration on")
     a = p.parse_args()
-    ev = Evaluator(nthread=a.threads)
+    if a.batch > 1:
+        assert a.run_dir and not a.clips and not a.ckpt
+        return eval_run_batched(a)
+    ev = Evaluator(nthread=a.threads, clips=a.clips.split(",") if a.clips else None, backend=a.sim_backend)
     if a.ckpt:
         res = ev.evaluate(load_tree(a.ckpt), a.record)
         print(json.dumps({k: v for k, v in res.items() if k != "per_clip"}, indent=1))
         return
-    out_csv = os.path.join(a.run_dir, "eval.csv")
+    out_csv = os.path.join(a.run_dir, a.out)
     done = set()
     if os.path.exists(out_csv):
         done = {int(line.split(",")[0]) for line in open(out_csv).read().strip().splitlines()[1:]}
@@ -131,13 +212,42 @@ def main():
             line = (f"{it},{meta['wall_time'] / 3600:.4f},{meta['saved_at']},{time.strftime('%Y-%m-%d %H:%M:%S')},{res['norm_return']:.4f},"
                     f"{res['norm_return_framew']:.4f},{res['n_failed']},{'|'.join(res['failed'])}\n")  # fmt: skip
             open(out_csv, "a").write(line)
-            json.dump(res, open(c + "_eval.json", "w"), indent=1)
+            json.dump(res, open(c + "_" + a.out.removesuffix(".csv") + ".json", "w"), indent=1)
             print(f"[eval] it {it} ({meta['wall_time'] / 60:.1f} min): norm return {res['norm_return']:.4f}, "
                   f"failed {res['n_failed']}/{ev.N} ({time.time() - t0:.0f} s)", flush=True)  # fmt: skip
             done.add(it)
         if not a.watch or (finished and not todo):
             break
         time.sleep(30)
+
+
+def eval_run_batched(a):
+    out_csv = os.path.join(a.run_dir, a.out)
+    done = set()
+    if os.path.exists(out_csv):
+        done = {int(line.split(",")[0]) for line in open(out_csv).read().strip().splitlines()[1:]}
+    else:
+        open(out_csv, "w").write("iteration,train_wall_h,saved_at,eval_at,norm_return,norm_return_framew,n_failed,failed\n")
+    todo = [c for c in ckpt_paths(a.run_dir)[:: a.every] if int(os.path.basename(c)[5:11]) not in done
+            and int(os.path.basename(c)[5:11]) >= a.min_it]  # fmt: skip
+    if not todo:
+        return
+    ev = BatchEvaluator(min(a.batch, len(todo)), nthread=a.threads, backend=a.sim_backend)
+    rows = []
+    for k in range(0, len(todo), ev.G):
+        group = todo[k : k + ev.G]
+        cks = [load_tree(c) for c in group]
+        t0 = time.time()
+        for c, ck, res in zip(group, cks, ev.evaluate(cks)):
+            it, meta = int(os.path.basename(c)[5:11]), ck["meta"]
+            rows.append((it, f"{it},{meta['wall_time'] / 3600:.4f},{meta['saved_at']},{time.strftime('%Y-%m-%d %H:%M:%S')},"
+                             f"{res['norm_return']:.4f},{res['norm_return_framew']:.4f},{res['n_failed']},{'|'.join(res['failed'])}\n"))  # fmt: skip
+            json.dump(res, open(c + "_" + a.out.removesuffix(".csv") + ".json", "w"), indent=1)
+            print(f"[eval] it {it} ({meta['wall_time'] / 60:.1f} min): norm return {res['norm_return']:.4f}, failed {res['n_failed']}/40", flush=True)
+        print(f"[eval] group of {len(group)} checkpoints in {time.time() - t0:.0f} s", flush=True)
+    with open(out_csv, "a") as f:
+        for _, line in sorted(rows):
+            f.write(line)
 
 
 if __name__ == "__main__":

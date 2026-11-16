@@ -37,9 +37,10 @@ class MLP(nn.Module):
         self.layers = [nn.Linear(a, b) for a, b in zip(dims[:-1], dims[1:])] + [nn.Linear(dims[-1], out)]
         self.norms = [nn.LayerNorm(h) for h in hidden] if layer_norm else []
         self.act = elu if act == "elu" else nn.silu
+        self.cdt = "global"  # matmul precision: "global" (COMPUTE_DTYPE) or a fixed dtype / None (fp32) for this MLP
 
     def __call__(self, x):
-        dt = COMPUTE_DTYPE
+        dt = COMPUTE_DTYPE if isinstance(self.cdt, str) else self.cdt
         if dt is None:
             for i, l in enumerate(self.layers[:-1]):
                 x = l(x)
@@ -201,6 +202,11 @@ class Policy(nn.Module):
 
     def muon_paths(self) -> list[str]:
         return self.enc.hidden_weight_paths("enc") + self.dec.hidden_weight_paths("dec")
+
+    def fix_compute_dtype(self, dt) -> "Policy":
+        """Fixed matmul precision for this policy (e.g. fp32 for an actor copy run on the CPU)."""
+        self.enc.cdt = self.dec.cdt = dt
+        return self
 
     def encode(self, goal: mx.array) -> mx.array:
         """Motion latent z from the goal features (reference only, independent of the robot state)."""

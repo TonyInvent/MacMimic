@@ -8,12 +8,18 @@ version = "0.1.0"
 description = "SuperMimic and BlinkMimic (G1 whole-body motion tracking with a differentiable world model) on Apple silicon: MLX + CPU MuJoCo."
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.14"
 dependencies = [
   "mlx>=0.29",
   "mujoco>=3.3.0",
   "numpy>=1.26",
   "matplotlib",
+]
+
+[project.optional-dependencies]
+superdex = [
+    "superdex-physics>=1.0.1",
+    "superdex-robotics>=1.0.1",
 ]
 
 [dependency-groups]

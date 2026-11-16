@@ -36,6 +36,12 @@ PRESETS = {
 
 
 PRESETS["xmimic"] = dict(PRESETS["blinkmimic"], overlap=True)
+# fine-tuning a pretrained (MuJoCo) run in SuperDex Physics: use with --init_from <run_dir>. Few worlds (SuperDex is
+# ~15x slower per world), the world model adapts first (--wm_only_iters), the policy at the base learning rate; the
+# source run's network flags are taken over by --init_from
+PRESETS["finetune_superdex"] = dict(PRESETS["blinkmimic"], sim_backend="superdex", num_envs=256, wm_only_iters=50, pi_lr_mult=1.0,
+                                    lr=1e-4, lr_decay_ret=0.0, lr_decay_by=0, eprobe_share=0.0, iterations=1000, ckpt_every=50,
+                                    warmup_steps=200)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,11 +103,19 @@ def build_parser() -> argparse.ArgumentParser:
     a("--log_dir", type=str, default=os.path.join(REPO, "logs", "run"))
     a("--seed", type=int, default=0)
     a("--resume", type=str, default=None, help="run directory with last/ to continue from")
+    a("--sim_backend", type=str, default="mujoco", choices=["mujoco", "superdex"],
+      help="simulator: CPU MuJoCo (mujoco.batch) or SuperDex Physics (supermimic_mlx.sdx, --sim_threads worker processes)")
+    a("--init_from", type=str, default=None,
+      help="fine-tuning: start from the networks (world model, policy + EMA, critic, normalizers) of this run's last "
+           "checkpoint, with fresh optimizers and schedules; its network flags are taken over")
     a("--reset_critic", action="store_true", help="--resume: start a fresh critic (and its optimizer); debugging")
     a("--sim_threads", type=int, default=None, help="default: all CPU cores")
     a("--overlap", action=argparse.BooleanOptionalAction, default=False,
       help="XMimic actor | learner: the world-model and policy updates of iteration i run on a GPU stream while the CPU "
            "simulator collects (and the probe sweep advances) with the policy and normalizers of iteration i - 1")
+    a("--actor_device", type=str, default="gpu", choices=["gpu", "cpu"],
+      help="--overlap: run the actor's and the probe sweep's policy forwards on the CPU (fp32, MLX's CPU backend), so they "
+           "do not queue behind the learner on the GPU")
     a("--fast_learner", action=argparse.BooleanOptionalAction, default=False,
       help="XMimic's learner hoisting: frames, goals and goal encodings of all imagined steps in one batch before the "
            "rollout; the windows of all world-model batches sampled at once and their updates in one compiled call")
@@ -121,6 +135,11 @@ def parse_args(argv=None):
 
 
 args = parse_args()
+NET_KEYS = ("wm_hidden", "enc_hidden", "dec_hidden", "wm_structured", "pi_ref_skip", "hist", "goal_frames", "horizon")
+if args.init_from:  # the pretrained run fixes the network architecture
+    _src = json.load(open(os.path.join(args.init_from, "args.json")))
+    for _k in NET_KEYS:
+        setattr(args, _k, _src[_k])
 
 import mlx.core as mx  # noqa: E402
 import mlx.nn as nn  # noqa: E402
@@ -214,6 +233,15 @@ if EMA is not None:
 
 start_it, wall_offset, sim_steps = 0, 0.0, 0
 RESUME_CTRL = None
+if args.init_from:
+    ck = load_tree(os.path.join(args.init_from, "last"))
+    wm.update(unflat(ck["wm"])), pi.update(unflat(ck["pi_live"])), critic.update(unflat(ck["critic"]))
+    if EMA is not None:
+        EMA["p"].update(ck.get("pi_avg", ck["pi_live"]))
+        EMA["n"] = 1  # continue the average from the pretrained one
+    mx.eval(wm.parameters(), pi.parameters(), critic.parameters(), EMA["p"] if EMA is not None else ())
+    print(f"--init_from {args.init_from}: networks of iteration {ck['meta']['iteration']} ({ck['meta']['args'].get('preset')})", flush=True)
+    del ck
 if args.resume:
     ck = load_tree(os.path.join(args.resume, "last"))
     wm.update(unflat(ck["wm"])), pi.update(unflat(ck["pi_live"]))
@@ -505,12 +533,22 @@ def policy_update(lr_pi, lr_v):
 
 # ------------------------------------------------------------------------------------------------ collection
 env = TrackingSim(args.num_envs, motion, mdp, layout, gamma=args.gamma, fail_reset=args.fail_reset, bin_fix=args.bin_fix,
-                  seed=args.seed, nthread=args.sim_threads)  # fmt: skip
+                  seed=args.seed, nthread=args.sim_threads, backend=args.sim_backend)  # fmt: skip
 if RESUME_CTRL is not None:
     env.bin_G, env.bin_fail, env.bin_w_avg = (np.array(RESUME_CTRL[k]) for k in ("bin_G", "bin_fail", "bin_w_avg"))
 buffer = ReplayBuffer(args.buffer_steps, args.num_envs, J, layout.dim, seed=args.seed)
 OBS_HIST = {"h": mx.zeros((args.num_envs, Hh, mdp.obs_dim))}
 ACT_PI = policy_from_args(vars(args), mdp.obs_dim, GOAL_DIM, J) if args.overlap else None  # --overlap: the actor's snapshot
+ACT_CPU = args.overlap and args.actor_device == "cpu"
+if ACT_CPU:
+    ACT_PI.fix_compute_dtype(None)  # fp32 on the CPU (Accelerate); the learner keeps bf16 on the GPU
+
+
+def actor_ctx():
+    """The stream of the actor phase (--overlap): the CPU with --actor_device cpu, else the default (GPU)."""
+    import contextlib
+
+    return mx.stream(mx.cpu) if ACT_CPU else contextlib.nullcontext()
 ACT_KEY = {"k": mx.random.key(args.seed + 1)}
 
 
@@ -575,7 +613,9 @@ def collect(n_steps: int, stats: dict, deferred: list | None = None):
             if deferred is None:
                 a, OBS_HIST["h"] = act_c(*args_)
             else:
-                a, OBS_HIST["h"], o, g = act_snap_c(*args_)
+                with actor_ctx():
+                    a, OBS_HIST["h"], o, g = act_snap_c(*args_)
+                    mx.eval(a)
             a = np.array(a)
         with prof("col.step"):
             out = env.step_core(a, s)
@@ -609,8 +649,10 @@ if EPROBE:
     EP_TILE = np.concatenate([np.arange(motion.clip_start_np[c], motion.clip_end_np[c] - 1, args.eprobe_tile) for c in range(len(motion.names))])
     P_EP = len(EP_TILE)
     penv = TrackingSim(P_EP, motion, mdp, layout, eval_mode=True, randomize=False, reset_noise=False, seed=args.seed,
-                       nthread=args.sim_threads)  # fmt: skip
+                       nthread=args.sim_threads, backend=args.sim_backend)  # fmt: skip
     EP_PI = policy_from_args(vars(args), mdp.obs_dim, GOAL_DIM, J)  # the sweep's policy: a snapshot of the EMA
+    if ACT_CPU:
+        EP_PI.fix_compute_dtype(None)
     EP_FAIL = np.zeros(motion.num_bins)
     _nxt = np.arange(motion.num_bins) + 1
     EP_NEXT = np.where((_nxt < motion.num_bins) & (motion.bin_clip_np[np.minimum(_nxt, motion.num_bins - 1)] == motion.bin_clip_np), _nxt, _nxt - 1)
@@ -625,9 +667,13 @@ if EPROBE:
     ep_act_c = mx.compile(_ep_act, inputs=[EP_PI.state], outputs=[EP_PI.state])
     # trace the probe step now, on the main thread before any learner thread runs (--overlap)
     _s = penv.state_flat()
-    mx.eval(ep_act_c(mx.array(_s), mx.array(penv.a_prev), mx.array(penv.xi), mx.array(penv.f.astype(np.int32)),
-                     mx.zeros((P_EP, Hh, mdp.obs_dim)))[0])  # fmt: skip
-    mx.eval(penv._reward_fn(mx.array(_s), mx.array(penv.f.astype(np.int32) + 1), mx.zeros((P_EP, J)), mx.zeros((P_EP, J))))
+    with actor_ctx():
+        mx.eval(ep_act_c(mx.array(_s), mx.array(penv.a_prev), mx.array(penv.xi), mx.array(penv.f.astype(np.int32)),
+                         mx.zeros((P_EP, Hh, mdp.obs_dim)))[0])  # fmt: skip
+    penv.cpu = ACT_CPU
+    with actor_ctx():
+        _fn = penv._reward_fn_cpu if ACT_CPU else penv._reward_fn
+        mx.eval(_fn(mx.array(_s), mx.array(penv.f.astype(np.int32) + 1), mx.zeros((P_EP, J)), mx.zeros((P_EP, J))))
 
     def eprobe_begin(it, ema_params):
         m = motion
@@ -648,7 +694,9 @@ if EPROBE:
     def eprobe_steps(k):
         for _ in range(min(k, EP["left"])):
             s = penv.state_flat()
-            a, EP["hist"] = ep_act_c(mx.array(s), mx.array(penv.a_prev), mx.array(penv.xi), mx.array(penv.f.astype(np.int32)), EP["hist"])
+            with actor_ctx():
+                a, EP["hist"] = ep_act_c(mx.array(s), mx.array(penv.a_prev), mx.array(penv.xi), mx.array(penv.f.astype(np.int32)), EP["hist"])
+                mx.eval(a)
             a = np.array(a)
             alive = ~penv.done_eval.copy()
             f_now = penv.f.copy()
@@ -750,6 +798,7 @@ stats = {"r": [], "ep_len": [], "ep_ret": [], "term": [], "done": []}
 t_c = time.time()
 collect(args.warmup_steps, stats)
 print(f"warmup: {args.warmup_steps} steps in {time.time() - t_c:.1f} s", flush=True)
+env.cpu = ACT_CPU  # from here the actor phase computes the reward heads on the CPU (--actor_device cpu)
 log_path = os.path.join(args.log_dir, "train_log.csv")
 new_log = start_it == 0 or not os.path.exists(log_path)
 log_f = open(log_path, "a")
@@ -826,6 +875,8 @@ for it in range(start_it, args.iterations):
             LEARNER.wait_idle()
         t1 = time.time()
         deferred = []
+        actx = actor_ctx()
+        actx.__enter__()
         if EPROBE:
             if EP and args.eprobe_async:
                 eprobe_steps(args.eprobe_async)
@@ -835,6 +886,7 @@ for it in range(start_it, args.iterations):
                 if not args.eprobe_async:
                     eprobe_steps(EP["left"])
         collect(n, stats, deferred)
+        actx.__exit__(None, None, None)
         t2 = time.time()
         l, e8, res = LEARNER.result()
         apply_deferred(deferred)
