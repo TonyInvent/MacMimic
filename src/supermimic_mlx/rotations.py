@@ -9,13 +9,27 @@ import mlx.core as mx
 
 
 def mm3(A: mx.array, B: mx.array) -> mx.array:
-    """A @ B for (..., 3, 3) matrices (broadcasting)."""
-    return (mx.expand_dims(A, -1) * mx.expand_dims(B, -3)).sum(-2)
+    """A @ B for (..., 3, 3) matrices (broadcasting). Unrolled over the contraction index: elementwise multiply-adds that
+    mx.compile fuses with their neighbours (a broadcast product + sum is a separate, slow reduction kernel); the
+    same operations in the same order as the summation, so bit-identical."""
+    return A[..., :, 0:1] * B[..., 0:1, :] + A[..., :, 1:2] * B[..., 1:2, :] + A[..., :, 2:3] * B[..., 2:3, :]
 
 
 def mv3(A: mx.array, v: mx.array) -> mx.array:
-    """A @ v for (..., 3, 3) matrices and (..., 3) vectors (broadcasting)."""
-    return (A * mx.expand_dims(v, -2)).sum(-1)
+    """A @ v for (..., 3, 3) matrices and (..., 3) vectors (broadcasting); unrolled as mm3."""
+    return A[..., :, 0] * v[..., 0:1] + A[..., :, 1] * v[..., 1:2] + A[..., :, 2] * v[..., 2:3]
+
+
+def sum_last(x: mx.array, keepdims: bool = False) -> mx.array:
+    """x.sum(-1) for a short last axis (<= 9), unrolled into elementwise adds in index order: mx.compile fuses them with
+    their neighbours, where a reduction is a separate kernel (slow on the many tiny (..., 3) reductions of FK)."""
+    n = x.shape[-1]
+    if n > 9:
+        return x.sum(-1, keepdims=keepdims)
+    out = x[..., 0:1] if keepdims else x[..., 0]
+    for i in range(1, n):
+        out = out + (x[..., i : i + 1] if keepdims else x[..., i])
+    return out
 
 
 def T(R: mx.array) -> mx.array:
@@ -24,7 +38,7 @@ def T(R: mx.array) -> mx.array:
 
 def normalize(x: mx.array, eps: float = 1e-12) -> mx.array:
     # clamp before the square root: sqrt's gradient at an exact zero is inf (and inf * 0 = NaN downstream)
-    return x / mx.sqrt(mx.maximum((x * x).sum(-1, keepdims=True), eps * eps))
+    return x / mx.sqrt(mx.maximum(sum_last(x * x, keepdims=True), eps * eps))
 
 
 def quat_to_mat(q: mx.array) -> mx.array:
@@ -89,7 +103,7 @@ def skew(v: mx.array) -> mx.array:
 
 def so3_exp(v: mx.array) -> mx.array:
     """Rotation vector (..., 3) -> matrix, smooth at zero."""
-    theta2 = (v * v).sum(-1, keepdims=True)
+    theta2 = sum_last(v * v, keepdims=True)
     theta = mx.sqrt(theta2 + 1e-12)
     small = theta2 < 1e-8
     a = mx.where(small, 1 - theta2 / 6, mx.sin(theta) / theta)
@@ -102,7 +116,7 @@ def so3_exp(v: mx.array) -> mx.array:
 def quat_to_rotvec(q: mx.array) -> mx.array:
     q = q * mx.where(q[..., :1] < 0, -1.0, 1.0)
     v = q[..., 1:]
-    sin_half = mx.sqrt(mx.maximum((v * v).sum(-1, keepdims=True), 1e-30))  # finite gradient at the identity
+    sin_half = mx.sqrt(mx.maximum(sum_last(v * v, keepdims=True), 1e-30))  # finite gradient at the identity
     half = mx.arctan2(sin_half, q[..., :1])
     scale = mx.where(sin_half < 1e-6, 2.0 / mx.maximum(q[..., :1], 1e-6), 2 * half / (sin_half + 1e-12))
     return v * scale
@@ -115,7 +129,7 @@ def so3_log(R: mx.array) -> mx.array:
 
 def rot_angle_sq(Ra: mx.array, Rb: mx.array) -> mx.array:
     """Squared geodesic angle between rotations (acos of the trace, clamped)."""
-    tr = (Ra * Rb).sum((-1, -2))
+    tr = sum_last((Ra * Rb).reshape(Ra.shape[:-2] + (9,)))
     cos = mx.clip((tr - 1) / 2, -1 + 1e-6, 1 - 1e-6)
     return mx.arccos(cos) ** 2
 
@@ -135,7 +149,7 @@ def mat_to_6d(R: mx.array) -> mx.array:
 
 
 def quat_slerp(q0: mx.array, q1: mx.array, t: mx.array) -> mx.array:
-    dot = (q0 * q1).sum(-1, keepdims=True)
+    dot = sum_last(q0 * q1, keepdims=True)
     q1 = mx.where(dot < 0, -q1, q1)
     dot = mx.minimum(mx.abs(dot), 1.0)
     theta = mx.arccos(dot)

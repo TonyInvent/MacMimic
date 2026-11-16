@@ -14,7 +14,7 @@ import numpy as np
 from .kinematics import Kinematics
 from .motion import MotionLib
 from .robots import g1
-from .rotations import mat_to_6d, mat_to_quat, mm3, mv3, quat_to_mat, rot_angle_sq, yaw_mat, T
+from .rotations import mat_to_6d, mat_to_quat, mm3, mv3, quat_to_mat, rot_angle_sq, yaw_mat, T, sum_last
 from .scene import CONTROL_DT
 
 
@@ -113,11 +113,11 @@ class MDP:
         bp, bR, bv, bw = self.kin.forward(p, R, v, w, q, qd)
         ref_bp, dR, rp, rR = self._ref_bodies(p, R, f)
         ref_bR = mm3(mx.expand_dims(dR, -3), m.body_R[f])
-        e_pos = ((ref_bp - bp) ** 2).sum(-1).mean(-1)
+        e_pos = sum_last(((ref_bp - bp) ** 2)).mean(-1)
         e_ori = rot_angle_sq(ref_bR, bR).mean(-1)
-        e_lv = ((m.body_v[f] - bv) ** 2).sum(-1).mean(-1)
-        e_av = ((m.body_w[f] - bw) ** 2).sum(-1).mean(-1)
-        e_rp = ((rp - p) ** 2).sum(-1)
+        e_lv = sum_last(((m.body_v[f] - bv) ** 2)).mean(-1)
+        e_av = sum_last(((m.body_w[f] - bw) ** 2)).mean(-1)
+        e_rp = sum_last(((rp - p) ** 2))
         e_ro = rot_angle_sq(rR, R)
         r_track = (
             mx.exp(-e_pos / c.body_pos_std**2)
@@ -135,7 +135,7 @@ class MDP:
             fz, rz = bp[..., feet, 2], m.body_p[f][..., feet, 2]
             c_sim = mx.sigmoid((CONTACT_Z - fz) / 0.005)
             c_ref = m.ref_contact[f] if m.ref_contact is not None else (rz < CONTACT_Z).astype(mx.float32)
-            slip = (bv[..., feet, :2] ** 2).sum(-1)
+            slip = sum_last((bv[..., feet, :2] ** 2))
             r_contact = (1 - (c_sim - c_ref) ** 2) + c_ref * mx.exp(-slip / 0.3**2)
             r = r + w_contact * r_contact.mean(-1) * CONTROL_DT
         if terms:

@@ -92,6 +92,7 @@ class MotionLib:
         self.clip_end = mx.array(self.clip_end_np.astype(np.int32))
         self.clip_id = mx.array(self.clip_id_np.astype(np.int32))
         self.ref_contact = None
+        self.goal_stride = 1  # goal frames f+1, f+1+s, ..., f+1+(K-1)s (supermimic_vibed v2: s = 5, ~0.9 s lookahead)
         mx.eval(self.body_p, self.body_R, self.body_v, self.body_w, self.root_v_local, self.root_w_local)
 
     @staticmethod
@@ -116,7 +117,7 @@ class MotionLib:
 
     def future_frames(self, f: mx.array, K: int) -> mx.array:
         end = self.clip_end[self.clip_id[f]]
-        fut = f[:, None] + mx.arange(1, K + 1, dtype=f.dtype)
+        fut = f[:, None] + 1 + self.goal_stride * mx.arange(K, dtype=f.dtype)
         return mx.minimum(fut, end[:, None])
 
     def goal(self, f: mx.array, K: int) -> mx.array:

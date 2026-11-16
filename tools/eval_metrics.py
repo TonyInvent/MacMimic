@@ -58,6 +58,7 @@ def run(cks):
     a0 = cks[0]["meta"]["args"]
     networks.set_compute_dtype(mx.bfloat16 if a0.get("precision") == "bf16" else None)
     K, Hh = a0["goal_frames"], a0["hist"]
+    motion.goal_stride = a0.get("goal_stride", 1)
     pis = []
     for ck in cks:
         pi = policy_from_args(ck["meta"]["args"], mdp.obs_dim, motion.goal_dim(K), J)

@@ -225,13 +225,20 @@ class Policy(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, in_dim: int):
+    def __init__(self, in_dim: int, v_max: float | None = None):
+        """``v_max``: clamp values to the maximum attainable discounted return (supermimic_vibed v2)."""
         super().__init__()
         self.net = MLP(in_dim, [256, 128], 1)
         self.norm = RunningNorm(in_dim)
+        self.v_max = v_max
 
     def __call__(self, x):
-        return self.net(self.norm(x)).squeeze(-1)
+        return self.head(self.norm(x))
+
+    def head(self, xn):
+        """The value of already-normalized inputs (the critic update normalizes its batch once, not per minibatch)."""
+        v = self.net(xn).squeeze(-1)
+        return v if self.v_max is None else mx.minimum(v, self.v_max)
 
 
 def policy_from_args(a_: dict, obs_dim: int, goal_dim: int, J: int) -> Policy:

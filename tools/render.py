@@ -33,6 +33,7 @@ m, env, mdp = ev.motion, ev.env, ev.mdp
 ck = load_tree(a.ckpt)
 ar = ck["meta"]["args"]
 K, Hh = ar["goal_frames"], ar["hist"]
+m.goal_stride = ar.get("goal_stride", 1)
 pi = policy_from_args(ar, mdp.obs_dim, m.goal_dim(K), len(g1.JOINT_NAMES))
 pi.update(unflat(ck["pi"]))
 c = m.names.index(a.clip)

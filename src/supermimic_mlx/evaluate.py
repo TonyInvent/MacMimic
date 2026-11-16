@@ -47,6 +47,7 @@ class Evaluator:
         a_ = ck["meta"]["args"]
         K, Hh = a_["goal_frames"], a_["hist"]
         networks.set_compute_dtype(mx.bfloat16 if a_.get("precision") == "bf16" else None)  # as trained (upstream: AMP)
+        self.motion.goal_stride = a_.get("goal_stride", 1)
         pi = policy_from_args(a_, self.mdp.obs_dim, m.goal_dim(K), len(g1.JOINT_NAMES))
         pi.update(unflat(ck["pi"]))
 
@@ -111,11 +112,12 @@ class BatchEvaluator:
         self.pis, self.act_c, self.sig = None, None, None
 
     def _setup(self, a_: dict):
-        sig = tuple(a_.get(k) for k in ("goal_frames", "hist", "enc_hidden", "dec_hidden", "pi_ref_skip", "precision"))
+        sig = tuple(a_.get(k) for k in ("goal_frames", "hist", "enc_hidden", "dec_hidden", "pi_ref_skip", "precision", "goal_stride"))
         if sig == self.sig:
             return
         self.sig = sig
         networks.set_compute_dtype(mx.bfloat16 if a_.get("precision") == "bf16" else None)
+        self.motion.goal_stride = a_.get("goal_stride", 1)
         m, C, K = self.motion, self.C, a_["goal_frames"]
         self.pis = [policy_from_args(a_, self.mdp.obs_dim, m.goal_dim(K), len(g1.JOINT_NAMES)) for _ in range(self.G)]
 

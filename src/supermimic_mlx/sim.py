@@ -120,6 +120,9 @@ class TrackingSim:
         self._reward_fn = mx.compile(self._reward_term)
         self._reward_fn_cpu = mx.compile(self._reward_term)  # traced separately on the CPU stream (compiled graphs keep their stream)
         self.cpu = False  # reward / termination heads on the CPU (train.py --actor_device cpu)
+        self.term_only = False  # termination only, in numpy, no reward (train.py's probe sweep: no GPU round trip)
+        self._ref_z = np.array(motion.root_p[:, 2], dtype=np.float32)
+        self._ref_r22 = np.array(motion.root_R[:, 2, 2], dtype=np.float32)
         self.t_physics = 0.0  # accumulated seconds in batch.step (profiling)
         self.reset(np.arange(N))
 
@@ -202,6 +205,14 @@ class TrackingSim:
         S1 = unflatten_state(s1)
         return self.mdp.reward(S1, f1, a, a_prev), self.mdp.termination(S1, f1)
 
+    def termination_np(self, s1: np.ndarray, f1: np.ndarray) -> np.ndarray:
+        """mdp.termination in numpy: root height / tilt (R[2, 2] of the normalized wxyz quaternion) vs frame f1."""
+        q = s1[:, 3:7] / np.linalg.norm(s1[:, 3:7], axis=-1, keepdims=True)
+        r22 = 1 - 2 * (q[:, 1] * q[:, 1] + q[:, 2] * q[:, 2])
+        f1 = np.minimum(f1, len(self._ref_z) - 1)
+        cfg = self.mdp.cfg
+        return (np.abs(self._ref_z[f1] - s1[:, 2]) > cfg.term_height) | (np.abs(self._ref_r22[f1] - r22) > cfg.term_tilt)
+
     def step(self, a) -> dict:
         out = self.step_core(a)
         if self.eval_mode:
@@ -227,13 +238,15 @@ class TrackingSim:
         self.t_physics += time.perf_counter() - t0
         s1 = self.state_flat()
         f1 = f + 1
-        if self.cpu:
+        if self.term_only:
+            r, term = np.zeros(len(s1)), self.termination_np(s1, f1)
+        elif self.cpu:
             with mx.stream(mx.cpu):
                 r, term = self._reward_fn_cpu(mx.array(s1), mx.array(f1.astype(np.int32)), mx.array(a_np), mx.array(a_prev))
                 mx.eval(r, term)
         else:
             r, term = self._reward_fn(mx.array(s1), mx.array(f1.astype(np.int32)), mx.array(a_np), mx.array(a_prev))
-        r, term = np.array(r, dtype=np.float64), np.array(term)
+        r, term = np.asarray(r, dtype=np.float64), np.asarray(term)
         # a diverged world (non-finite state; MuJoCo's auto-reset is off, see scene.apply_options), a non-finite action
         # or reward ends the episode as a failure; the world is rolled back to its last finite state, so the stored
         # transition is a standstill and an evaluation world stays frozen (failed) instead of stepping NaNs

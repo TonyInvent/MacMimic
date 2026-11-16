@@ -41,10 +41,13 @@ def clip_grad_value(grads: dict, v: float) -> dict:
     return {k: mx.clip(g, -v, v) for k, g in grads.items()}
 
 
+NS_DTYPE = mx.float32  # train.py --ns_bf16 sets bf16 (as torch.optim.Muon runs it); off by default, no speedup measured here
+
+
 def newton_schulz(G: mx.array, steps: int = 5, eps: float = 1e-7) -> mx.array:
-    """torch.optim._muon._zeropower_via_newtonschulz (in fp32 here; torch runs it in bf16)."""
+    """torch.optim._muon._zeropower_via_newtonschulz (torch runs it in bf16; here in NS_DTYPE)."""
     a, b, c = NS_COEF
-    X = G
+    X = G.astype(NS_DTYPE)
     transposed = G.shape[0] > G.shape[1]
     if transposed:
         X = X.T
@@ -53,7 +56,8 @@ def newton_schulz(G: mx.array, steps: int = 5, eps: float = 1e-7) -> mx.array:
         A = X @ X.T
         B = b * A + c * (A @ A)
         X = a * X + B @ X
-    return X.T if transposed else X
+    X = X.T if transposed else X
+    return X.astype(G.dtype)
 
 
 class MuonAdam:
