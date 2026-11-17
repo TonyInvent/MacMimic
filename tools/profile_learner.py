@@ -26,6 +26,7 @@ p.add_argument("--horizon", type=int, default=32)
 p.add_argument("--wm_batch", type=int, default=2048)
 p.add_argument("--fp32", action="store_true")
 p.add_argument("--reps", type=int, default=5)
+p.add_argument("--breakdown", action="store_true", help="split the world-model update and the critic step into parts")
 p.add_argument("--enc_hidden", type=str, default="2048,1024,512,256")
 p.add_argument("--dec_hidden", type=str, default="2048,1024,512,256")
 p.add_argument("--skip_gemm", action="store_true")
@@ -186,6 +187,19 @@ def wm_step():
 
 report("world-model update (x5 per iteration)", timeit(mx.compile(wm_step, inputs=[wm.state, wopt.state], outputs=[wm.state, wopt.state])),
        3 * 2 * Bw * W * P_wm / 1e9)  # fmt: skip
+# breakdown of one world-model update and one critic step: loss forward, forward + backward, the optimizer step alone
+if a.breakdown:
+    report("  wm: loss forward", timeit(mx.compile(wm_loss, inputs=[wm.state])), 2 * Bw * W * P_wm / 1e9)
+    report("  wm: forward + backward", timeit(mx.compile(lambda: list(flat(wvg()[1]).values()), inputs=[wm.state], outputs=[wm.state])), 3 * 2 * Bw * W * P_wm / 1e9)
+    g_fix = flat(wvg()[1]); mx.eval(g_fix)
+    report("  wm: gradient clip + MuonAdam step alone", timeit(mx.compile(
+        lambda: list(wopt.step(flat(wm.trainable_parameters()), clip_grad_norm(g_fix, 1.0)[0], mx.array(1e-4)).values()),
+        inputs=[wm.state, wopt.state], outputs=[wm.state, wopt.state])))
+    report("  critic: forward + backward", timeit(mx.compile(lambda: list(flat(cvg()[1]).values()), inputs=[critic.state], outputs=[critic.state])), 3 * 2 * mb * P_v / 1e9)
+    gc_fix = flat(cvg()[1]); mx.eval(gc_fix)
+    report("  critic: gradient clip + optimizer step alone", timeit(mx.compile(
+        lambda: list(copt.step(flat(critic.trainable_parameters()), clip_grad_norm(gc_fix, 1.0)[0], mx.array(1e-4)).values()),
+        inputs=[critic.state, copt.state], outputs=[critic.state, copt.state])))
 r = {n: (ms, gf) for n, ms, gf in rows}
 it_ms = r["BPTT forward + backward"][0] + r["policy MuonAdam step"][0] + r["critic features (FK) over (H+1) B"][0] + 20 * r["critic: one minibatch step (x20 per iteration)"][0] + 5 * r["world-model update (x5 per iteration)"][0]
 print(f"\nestimated learner per iteration: {it_ms:.0f} ms = BPTT {r['BPTT forward + backward'][0]:.0f} + Muon {r['policy MuonAdam step'][0]:.0f} + critic "
