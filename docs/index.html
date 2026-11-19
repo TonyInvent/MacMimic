@@ -159,6 +159,7 @@
   th { font-weight: 650; font-size: 14.5px; color: var(--ink-2); }
   td:first-child { font-weight: 600; width: 44%; }
   td code, p code, li code { font-size: 0.9em; }
+  tr.group th { padding-top: 26px; color: var(--ink); font-size: 16px; font-weight: 750; }
 
   /* notes */
   .notes { margin: 0; padding-left: 1.1em; max-width: var(--measure); }
@@ -215,9 +216,9 @@
     <div class="hero">
       <div>
         <h1>Teach a simulated humanoid 40 motions in 22&nbsp;minutes, on a MacBook.</h1>
-        <p class="lede">MacMimic trains a whole-body motion-tracking policy for the Unitree G1 entirely on Apple silicon:
-          MuJoCo simulates 4,096 robots on the CPU while MLX trains a differentiable world model and the policy on the GPU.
-          No CUDA, no cloud, MIT licensed.</p>
+        <p class="lede">A simulated Unitree G1 humanoid learns to copy 40 human motion-capture clips, from walking and sprinting to
+          dancing, getting up off the floor and a cartwheel, on a MacBook Pro (M4 Pro). MuJoCo simulates 4,096 robots on the CPU while
+          MLX trains the networks on the GPU. No CUDA, no cloud, MIT licensed.</p>
         <div class="actions">
           <a class="btn primary" href="https://github.com/air23zj/macmimic">View the code</a>
           <a class="btn" href="#quickstart">Train it yourself</a>
@@ -236,8 +237,11 @@
 
     <section aria-labelledby="race">
       <h2 id="race">Time to the benchmark target</h2>
-      <p class="intro">The target: an average tracking return of at least 0.82 with none of the 40 clips failing, held
-        for three checkpoints in a row. All runs used the same MacBook and the same simulator, rewards and evaluation.</p>
+      <p class="intro">The target: each of the 40 clips is played from its first frame to its last, and the robot must
+        score at least 0.82 on average (1.0 is a perfect copy of the motion) without failing any clip (failing means
+        falling or straying from the motion: the pelvis more than 25 cm above or below the reference's, or the torso
+        tilted far from it). This has to hold at three checkpoints in a row, 100 training iterations apart; the time
+        shown is the first of the three. All runs used the same MacBook and the same simulator, rewards and evaluation.</p>
       <figure>
         <div class="screen chart" id="chart">
           <svg class="wide" viewBox="0 0 720 236" role="img" aria-labelledby="chart-title chart-desc">
@@ -268,22 +272,19 @@
 
             <g class="row" tabindex="0" data-tip="&lt;b&gt;MacMimic&lt;/b&gt;, this repository&lt;br&gt;3 runs: 21.0, 21.3 and 22.5 min (iteration 1,400 to 1,500)&lt;br&gt;1.09 to 1.11 iterations per second">
               <rect class="hit" x="0" y="20" width="720" height="44" fill="transparent" rx="6"/>
-              <text class="name" x="0" y="40">MacMimic</text>
-              <text class="sub" x="0" y="57">3 runs</text>
+              <text class="name" x="0" y="47">MacMimic</text>
               <path d="M176 31 H359 Q363 31 363 35 V49 Q363 53 359 53 H176 Z" fill="#3987e5"/>
               <text class="val" x="373" y="47">22 min</text>
             </g>
             <g class="row" tabindex="0" data-tip="&lt;b&gt;BlinkMimic port&lt;/b&gt;, the same algorithm in this repository&lt;br&gt;1 run: 44.0 min (iteration 1,600)&lt;br&gt;0.61 iterations per second">
               <rect class="hit" x="0" y="80" width="720" height="44" fill="transparent" rx="6"/>
-              <text class="name" x="0" y="100">BlinkMimic port</text>
-              <text class="sub" x="0" y="117">1 run</text>
+              <text class="name" x="0" y="107">BlinkMimic port</text>
               <path d="M176 91 H553 Q557 91 557 95 V109 Q557 113 553 113 H176 Z" fill="#5b616b"/>
               <text class="val" x="567" y="107">44 min</text>
             </g>
             <g class="row" tabindex="0" data-tip="&lt;b&gt;XMimic port&lt;/b&gt;, actor and learner split on one Mac&lt;br&gt;1 run: target not reached by 57 min (first clean checkpoint at 54.2 min)&lt;br&gt;0.65 iterations per second">
               <rect class="hit" x="0" y="140" width="720" height="44" fill="transparent" rx="6"/>
-              <text class="name" x="0" y="160">XMimic port</text>
-              <text class="sub" x="0" y="177">1 run</text>
+              <text class="name" x="0" y="167">XMimic port</text>
               <rect x="176" y="151" width="494" height="22" fill="url(#fade)"/>
               <text class="val in" x="604" y="167" text-anchor="end">not reached in 57 min</text>
             </g>
@@ -315,19 +316,19 @@
             </defs>
             <g class="row" tabindex="0" data-tip="&lt;b&gt;MacMimic&lt;/b&gt;, this repository&lt;br&gt;3 runs: 21.0, 21.3 and 22.5 min (iteration 1,400 to 1,500)&lt;br&gt;1.09 to 1.11 iterations per second">
               <rect class="hit" x="-4" y="0" width="344" height="58" fill="transparent" rx="6"/>
-              <text class="name" x="0" y="17">MacMimic <tspan class="sub">3 runs</tspan></text>
+              <text class="name" x="0" y="17">MacMimic</text>
               <path d="M0 28 H104 Q108 28 108 32 V44 Q108 48 104 48 H0 Z" fill="#3987e5"/>
               <text class="val" x="116" y="43">22 min</text>
             </g>
             <g class="row" tabindex="0" data-tip="&lt;b&gt;BlinkMimic port&lt;/b&gt;, the same algorithm in this repository&lt;br&gt;1 run: 44.0 min (iteration 1,600)&lt;br&gt;0.61 iterations per second">
               <rect class="hit" x="-4" y="62" width="344" height="58" fill="transparent" rx="6"/>
-              <text class="name" x="0" y="79">BlinkMimic port <tspan class="sub">1 run</tspan></text>
+              <text class="name" x="0" y="79">BlinkMimic port</text>
               <path d="M0 90 H216 Q220 90 220 94 V106 Q220 110 216 110 H0 Z" fill="#5b616b"/>
               <text class="val" x="228" y="105">44 min</text>
             </g>
             <g class="row" tabindex="0" data-tip="&lt;b&gt;XMimic port&lt;/b&gt;, actor and learner split on one Mac&lt;br&gt;1 run: target not reached by 57 min (first clean checkpoint at 54.2 min)&lt;br&gt;0.65 iterations per second">
               <rect class="hit" x="-4" y="124" width="344" height="58" fill="transparent" rx="6"/>
-              <text class="name" x="0" y="141">XMimic port <tspan class="sub">1 run</tspan></text>
+              <text class="name" x="0" y="141">XMimic port</text>
               <rect x="0" y="152" width="285" height="20" fill="url(#fade-n)"/>
               <text class="val in" x="248" y="167" text-anchor="end">not reached in 57 min</text>
             </g>
@@ -343,45 +344,52 @@
 
     <section aria-labelledby="how">
       <h2 id="how">How it works</h2>
-      <p class="intro">The method is SuperMimic's, as refined by BlinkMimic: learn the physics, then learn the motion by
-        differentiating through the learned physics. Every iteration runs this loop.</p>
+      <p class="intro">MacMimic is BlinkMimic's algorithm (SuperMimic's method, refined), run with XMimic's overlap of
+        simulator and learner, and tuned for a Mac. The idea: first learn a model of the robot's physics, then improve the
+        policy by differentiating through that model. One training iteration, about 0.9 seconds, runs these three steps:</p>
       <ol class="steps">
         <li>
           <h3>Simulate</h3>
-          <p>4,096 copies of the G1 run in MuJoCo across the CPU cores, each tracking a stretch of a motion clip with the
-            current policy.</p>
+          <p>4,096 copies of the G1 run in MuJoCo on the CPU cores, each following a stretch of one clip with the current
+            policy. Every step is stored.</p>
         </li>
         <li>
           <h3>Learn the physics</h3>
-          <p>A neural world model learns to predict the robot's next state from the simulator's data, on the GPU with MLX.</p>
+          <p>A neural network, the world model, learns to predict the robot's next state from its current state and motor
+            commands, trained on the stored steps on the GPU with MLX.</p>
         </li>
         <li>
           <h3>Learn the motion</h3>
-          <p>The policy improves by backpropagating through 32 imagined steps of the world model, with a critic for the
-            longer term.</p>
+          <p>The policy plays 32 steps (0.64 s) ahead inside the world model and is improved by backpropagating the tracking
+            error through them; a second network, the critic, estimates how the motion goes on after that.</p>
         </li>
       </ol>
-      <p class="loopnote">The CPU and the GPU work at the same time, on separate threads, sharing the Mac's unified memory.</p>
+      <p class="loopnote">The CPU and the GPU work at the same time, on separate threads, sharing the Mac's unified memory.
+        Every 60 iterations, a probe also plays all 40 clips with the current policy, in 12-second windows, to find where
+        it fails; afterwards, 30% of the robots' restarts begin just before those spots.</p>
     </section>
 
     <section aria-labelledby="fast">
       <h2 id="fast">What made it fast</h2>
-      <p class="intro">MacMimic is the XMimic recipe retuned for the time to the target on one Mac. The changes that held
-        up across runs, the largest first:</p>
+      <p class="intro">From the BlinkMimic port's 44 minutes to 29 with the first version, then to 22. The changes that held
+        up across runs:</p>
       <div class="tablewrap">
         <table>
           <thead><tr><th scope="col">Change</th><th scope="col">Effect</th></tr></thead>
           <tbody>
-            <tr><td>The world model trained at 8 times the step size</td><td>it learns the robot's physics faster; failing clips are cleared about 300 iterations earlier, at no extra cost</td></tr>
-            <tr><td>3 world-model updates per iteration instead of 5</td><td>enough at that step size: 19% less time per iteration</td></tr>
-            <tr><td>From iteration 400, a larger policy batch (1,280), with 10% of the imagined rollouts started where the probes find failures</td><td>uses the GPU while the CPU is busy with the probes; the hardest clip, a cartwheel, is learned earlier</td></tr>
-            <tr><td>Simulator and learner on separate threads, bf16 where this GPU runs it faster</td><td>0.61 to 0.65&ndash;0.76 iterations per second for the same algorithm</td></tr>
-            <tr><td>A smaller policy batch than BlinkMimic's 2,048: 1,024 samples, 1,280 from iteration 400</td><td>much less time per iteration for some more iterations: faster overall</td></tr>
-            <tr><td>Policy step-size decay from iteration 800 instead of 1,400</td><td>the return rises about 100 iterations earlier</td></tr>
-            <tr><td>Evaluation probes from iteration 400, every 60, on a worker thread</td><td>failing clips are found and practised earlier, without stalling the GPU</td></tr>
-            <tr><td>Rotation math unrolled into fusable operations</td><td>forward kinematics and reward 5&ndash;8 times faster in isolation</td></tr>
-            <tr><td>A faster-moving policy average (0.99)</td><td>fewer clips failing late in training</td></tr>
-            <tr><td>Next batches gathered while the GPU is busy; LayerNorm on bf16 activations</td><td>2.5% and about 3% more iterations per second</td></tr>
+            <tr class="group"><th colspan="2" scope="colgroup">44 to 29 minutes: the first version (<code>--preset macmimic_v1</code>)</th></tr>
+            <tr><td>Simulator and learner run at the same time on separate threads (XMimic's idea); bf16 matrix math where this GPU runs it faster</td><td>0.61 to 0.65&ndash;0.76 iterations per second for the same algorithm</td></tr>
+            <tr><td>Policy batch of 1,024 samples instead of 2,048</td><td>38% less time per iteration for about 200 more iterations: faster overall</td></tr>
+            <tr><td>Probes from iteration 400 instead of 1,000, every 60 iterations instead of 125, on a worker thread</td><td>failing clips are found and practised earlier, without stalling the GPU</td></tr>
+            <tr><td>Learning-rate decay from iteration 1,100 instead of 1,400</td><td>recovers about 100 iterations of the smaller batch's deficit</td></tr>
+            <tr><td>Policy averaged over the last ~100 iterations (0.99) instead of ~200</td><td>fewer clips failing late in training</td></tr>
+            <tr><td>Rotation math unrolled into fusable operations; next batches gathered while the GPU is busy</td><td>a policy update about 4% faster, and 2.5% more iterations per second</td></tr>
+            <tr class="group"><th colspan="2" scope="colgroup">29 to 22 minutes: MacMimic (<code>--preset macmimic</code>)</th></tr>
+            <tr><td>The world model trained at 8 times the learning rate</td><td>it learns the physics faster; failing clips are cleared about 300 iterations earlier, at no extra cost</td></tr>
+            <tr><td>3 world-model updates per iteration instead of 5</td><td>enough at that learning rate: 19% less time per iteration</td></tr>
+            <tr><td>From iteration 400, a policy batch of 1,280, with 10% of the imagined rollouts started where the probes found failures</td><td>uses the GPU while the CPU runs the probes; the hardest clip, a cartwheel, is learned earlier</td></tr>
+            <tr><td>Learning-rate decay from iteration 800 instead of 1,100</td><td>the score rises about 100 iterations earlier</td></tr>
+            <tr><td>LayerNorm on bf16 activations</td><td>about 3% more iterations per second</td></tr>
           </tbody>
         </table>
       </div>
@@ -397,9 +405,9 @@
         <li>MacMimic's time is the mean of three runs with different seeds (21.0 to 22.5 minutes; the slowest alone is 1.95
           times faster than the BlinkMimic port). The baselines are one run each. Between seeds, the iteration at which the
           target is reached varies by about 100.</li>
-        <li>The target is a threshold, and a run that has just crossed it tracks a little less precisely than one that crossed
-          it later. At its target MacMimic tracks with a return of 0.822 and 4.4 cm average body position error, BlinkMimic
-          with 0.847 and 3.9 cm; the time to equal tracking quality was not measured for this version.</li>
+        <li>The target is a threshold, not equal quality. When each reaches it, BlinkMimic tracks a little more precisely:
+          a score of 0.847 and 3.9 cm average body position error, against 0.822 and 4.4 cm for MacMimic. How long MacMimic
+          needs to match BlinkMimic's precision was not measured.</li>
         <li>Everything here is simulation. The policy has not been run on a physical robot.</li>
       </ul>
     </section>
@@ -416,7 +424,8 @@ bash scripts/train.sh macmimic logs/macmimic_s0 --seed 0</code></pre>
         <div>
           <p>You need a Mac with Apple silicon, <a href="https://docs.astral.sh/uv/">uv</a> and curl. The full 2,000
             iterations take about 30 minutes on an M4 Pro; the target is usually reached by iteration 1,400&ndash;1,500. Settings that
-            only affect speed and memory are chosen automatically for the Mac you run on.</p>
+            only affect speed and memory (simulator threads, bf16 or fp32, memory limits) are chosen automatically for the
+            Mac you run on.</p>
           <p>The same repository trains SuperMimic, BlinkMimic and XMimic (<code>--preset</code>), evaluates checkpoints and
             renders videos like the one above.</p>
         </div>
@@ -428,9 +437,10 @@ bash scripts/train.sh macmimic logs/macmimic_s0 --seed 0</code></pre>
       <ul class="credits">
         <li><a href="https://github.com/fuyichen0725/blinkmimic">BlinkMimic</a> <span>the algorithm and presets ported here (MIT)</span></li>
         <li><a href="https://github.com/HybridRobotics/supermimic">SuperMimic</a> <span>the method, Liao et al. 2026 (Apache-2.0)</span></li>
-        <li><a href="https://github.com/nico-bohlinger/xmimic">XMimic</a> <span>the actor and learner split</span></li>
+        <li><a href="https://github.com/nico-bohlinger/xmimic">XMimic</a> <span>running the simulator and the learner at the same time</span></li>
         <li><a href="https://github.com/zita-ch/supermimic_vibed">supermimic_vibed</a> and <a href="https://github.com/Huy-Quang-Dao/instantTrack">InstantTrack</a> <span>code BlinkMimic builds on (MIT)</span></li>
-        <li><a href="https://github.com/ml-explore/mlx">MLX</a> and <a href="https://mujoco.org">MuJoCo</a> <span>learning on the GPU, simulation on the CPU</span></li>
+        <li><a href="https://mujoco.org">MuJoCo</a> <span>physics simulation, on the CPU</span></li>
+        <li><a href="https://github.com/ml-explore/mlx">MLX</a> <span>the world model, policy and critic, trained on the GPU</span></li>
         <li>LAFAN1 by Ubisoft La Forge, G1 by Unitree <span>motions (CC BY-NC-ND 4.0) and robot model (BSD-3-Clause)</span></li>
       </ul>
     </section>

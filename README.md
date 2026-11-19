@@ -6,6 +6,9 @@
 port on the same Mac.** MacMimic trains whole-body motion tracking end to end on Apple silicon: MuJoCo simulates 4,096
 robots on the CPU while MLX trains a differentiable world model and the policy on the GPU. No CUDA, no PyTorch, no cloud.
 
+MacMimic is BlinkMimic's algorithm (SuperMimic's method, refined), run with XMimic's overlap of simulator and learner,
+and tuned for a Mac.
+
 [Project page](https://air23zj.github.io/macmimic/) · [Results](RESULTS.md) ·
 [What worked and what didn't](docs/macmimic_hillclimb.md)
 
@@ -44,9 +47,9 @@ uv run python tools/time_to_target.py logs/macmimic_s0
 
 ## What is in this repository
 
-MacMimic started as a port of [BlinkMimic](https://github.com/fuyichen0725/blinkmimic) (which contains a faithful
-SuperMimic baseline) from mjlab / MuJoCo Warp / PyTorch + CUDA to Apple silicon. All four presets share the simulator,
-MDP, reward and evaluator, as upstream:
+The code started as a port of [BlinkMimic](https://github.com/fuyichen0725/blinkmimic) (which also contains a faithful
+SuperMimic baseline) from mjlab / MuJoCo Warp / PyTorch + CUDA to Apple silicon. All presets share the simulator, MDP,
+reward and evaluator, as upstream:
 
 | upstream (RTX 4090) | here (M-series Mac) |
 |---|---|
