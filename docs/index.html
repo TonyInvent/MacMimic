@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MacMimic: humanoid motion tracking trained in 29 minutes on a MacBook</title>
-<meta name="description" content="MacMimic trains a whole-body motion-tracking policy for the Unitree G1 on Apple silicon: MuJoCo on the CPU, a differentiable world model in MLX on the GPU. 29 minutes to the benchmark target on a MacBook Pro. Open source, MIT.">
+<title>MacMimic: humanoid motion tracking trained in 22 minutes on a MacBook</title>
+<meta name="description" content="MacMimic trains a whole-body motion-tracking policy for the Unitree G1 on Apple silicon: MuJoCo on the CPU, a differentiable world model in MLX on the GPU. 22 minutes to the benchmark target on a MacBook Pro, 2x faster than a BlinkMimic port on the same Mac. Open source, MIT.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="MacMimic: a simulated humanoid learns 40 motions in 29 minutes on a MacBook">
+<meta property="og:title" content="MacMimic: a simulated humanoid learns 40 motions in 22 minutes on a MacBook">
 <meta property="og:description" content="Whole-body motion tracking for the Unitree G1, trained end to end on Apple silicon with MLX and MuJoCo. No CUDA, no cloud. Open source.">
 <meta property="og:url" content="https://air23zj.github.io/macmimic/">
 <meta property="og:image" content="https://air23zj.github.io/macmimic/assets/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="MacMimic: a simulated humanoid learns 40 motions in 29 minutes on a MacBook">
+<meta name="twitter:title" content="MacMimic: a simulated humanoid learns 40 motions in 22 minutes on a MacBook">
 <meta name="twitter:description" content="Whole-body motion tracking for the Unitree G1, trained end to end on Apple silicon with MLX and MuJoCo. Open source.">
 <meta name="twitter:image" content="https://air23zj.github.io/macmimic/assets/og.png">
 <meta name="theme-color" content="#e6e7e9">
@@ -214,7 +214,7 @@
   <main>
     <div class="hero">
       <div>
-        <h1>Teach a simulated humanoid 40 motions in 29&nbsp;minutes, on a MacBook.</h1>
+        <h1>Teach a simulated humanoid 40 motions in 22&nbsp;minutes, on a MacBook.</h1>
         <p class="lede">MacMimic trains a whole-body motion-tracking policy for the Unitree G1 entirely on Apple silicon:
           MuJoCo simulates 4,096 robots on the CPU while MLX trains a differentiable world model and the policy on the GPU.
           No CUDA, no cloud, MIT licensed.</p>
@@ -228,7 +228,7 @@
           <video id="hero-video" src="assets/hero.mp4" poster="assets/poster.jpg" muted loop playsinline preload="metadata"
             aria-label="The simulated Unitree G1, in white, tracking a cartwheel, a get-up, a sprint, a dance and jumps next to the human reference motion, in blue."></video>
         </div>
-        <figcaption>The policy after 29 minutes of training on a MacBook Pro (M4 Pro), tracking motions from its 40-clip
+        <figcaption>The policy after 21 minutes of training on a MacBook Pro (M4 Pro), tracking motions from its 40-clip
           training set. White: the simulated robot. <span class="swatch" style="background:#4d8cff" aria-hidden="true"></span>Blue: the human
           motion it follows. Each clip is simulated from its first frame, as in the evaluation.</figcaption>
       </figure>
@@ -242,7 +242,7 @@
         <div class="screen chart" id="chart">
           <svg class="wide" viewBox="0 0 720 236" role="img" aria-labelledby="chart-title chart-desc">
             <title id="chart-title">Minutes to the benchmark target on a MacBook Pro (M4 Pro), lower is better</title>
-            <desc id="chart-desc">MacMimic: 29 minutes, mean of 3 runs (27.9, 29.2 and 30.1). BlinkMimic port: 44.0 minutes, 1 run. XMimic port: target not reached in 57 minutes, 1 run.</desc>
+            <desc id="chart-desc">MacMimic: 21.6 minutes, mean of 3 runs (21.0, 21.3 and 22.5). BlinkMimic port: 44.0 minutes, 1 run. XMimic port: target not reached in 57 minutes, 1 run.</desc>
             <!-- plot: x 176..696 = 0..60 min (8.667 px per minute) -->
             <g stroke="#262a31" stroke-width="1">
               <line x1="176" y1="14" x2="176" y2="196"/>
@@ -266,12 +266,12 @@
               </linearGradient>
             </defs>
 
-            <g class="row" tabindex="0" data-tip="&lt;b&gt;MacMimic&lt;/b&gt;, this repository&lt;br&gt;3 runs: 27.9, 29.2 and 30.1 min (iteration 1,600 to 1,700)&lt;br&gt;0.94 to 0.97 iterations per second">
+            <g class="row" tabindex="0" data-tip="&lt;b&gt;MacMimic&lt;/b&gt;, this repository&lt;br&gt;3 runs: 21.0, 21.3 and 22.5 min (iteration 1,400 to 1,500)&lt;br&gt;1.09 to 1.11 iterations per second">
               <rect class="hit" x="0" y="20" width="720" height="44" fill="transparent" rx="6"/>
               <text class="name" x="0" y="40">MacMimic</text>
               <text class="sub" x="0" y="57">3 runs</text>
-              <path d="M176 31 H424 Q428 31 428 35 V49 Q428 53 424 53 H176 Z" fill="#3987e5"/>
-              <text class="val" x="438" y="47">29 min</text>
+              <path d="M176 31 H359 Q363 31 363 35 V49 Q363 53 359 53 H176 Z" fill="#3987e5"/>
+              <text class="val" x="373" y="47">22 min</text>
             </g>
             <g class="row" tabindex="0" data-tip="&lt;b&gt;BlinkMimic port&lt;/b&gt;, the same algorithm in this repository&lt;br&gt;1 run: 44.0 min (iteration 1,600)&lt;br&gt;0.61 iterations per second">
               <rect class="hit" x="0" y="80" width="720" height="44" fill="transparent" rx="6"/>
@@ -291,7 +291,7 @@
           <!-- narrow screens: names above the bars; plot x 0..300 = 0..60 min (5 px per minute) -->
           <svg class="narrow" viewBox="0 0 340 214" role="img" aria-labelledby="chart-title-n chart-desc-n">
             <title id="chart-title-n">Minutes to the benchmark target on a MacBook Pro (M4 Pro), lower is better</title>
-            <desc id="chart-desc-n">MacMimic: 29 minutes, mean of 3 runs (27.9, 29.2 and 30.1). BlinkMimic port: 44.0 minutes, 1 run. XMimic port: target not reached in 57 minutes, 1 run.</desc>
+            <desc id="chart-desc-n">MacMimic: 21.6 minutes, mean of 3 runs (21.0, 21.3 and 22.5). BlinkMimic port: 44.0 minutes, 1 run. XMimic port: target not reached in 57 minutes, 1 run.</desc>
             <g stroke="#262a31" stroke-width="1">
               <line x1="0.5" y1="30" x2="0.5" y2="182"/>
               <line x1="75" y1="30" x2="75" y2="182"/>
@@ -313,11 +313,11 @@
                 <stop offset="1" stop-color="#5b616b" stop-opacity="0"/>
               </linearGradient>
             </defs>
-            <g class="row" tabindex="0" data-tip="&lt;b&gt;MacMimic&lt;/b&gt;, this repository&lt;br&gt;3 runs: 27.9, 29.2 and 30.1 min (iteration 1,600 to 1,700)&lt;br&gt;0.94 to 0.97 iterations per second">
+            <g class="row" tabindex="0" data-tip="&lt;b&gt;MacMimic&lt;/b&gt;, this repository&lt;br&gt;3 runs: 21.0, 21.3 and 22.5 min (iteration 1,400 to 1,500)&lt;br&gt;1.09 to 1.11 iterations per second">
               <rect class="hit" x="-4" y="0" width="344" height="58" fill="transparent" rx="6"/>
               <text class="name" x="0" y="17">MacMimic <tspan class="sub">3 runs</tspan></text>
-              <path d="M0 28 H142 Q146 28 146 32 V44 Q146 48 142 48 H0 Z" fill="#3987e5"/>
-              <text class="val" x="154" y="43">29 min</text>
+              <path d="M0 28 H104 Q108 28 108 32 V44 Q108 48 104 48 H0 Z" fill="#3987e5"/>
+              <text class="val" x="116" y="43">22 min</text>
             </g>
             <g class="row" tabindex="0" data-tip="&lt;b&gt;BlinkMimic port&lt;/b&gt;, the same algorithm in this repository&lt;br&gt;1 run: 44.0 min (iteration 1,600)&lt;br&gt;0.61 iterations per second">
               <rect class="hit" x="-4" y="62" width="344" height="58" fill="transparent" rx="6"/>
@@ -337,7 +337,7 @@
         <figcaption>Hover, tap or focus a bar for details. Baselines are this repository's MLX ports of BlinkMimic and XMimic,
           run on the same machine; full tables in <a href="https://github.com/air23zj/macmimic/blob/main/RESULTS.md">RESULTS.md</a>.</figcaption>
       </figure>
-      <p class="after">MacMimic reaches the target 1.5 times faster than the BlinkMimic port and at least 1.95 times faster
+      <p class="after">MacMimic reaches the target 2.04 times faster than the BlinkMimic port and at least 2.6 times faster
         than the XMimic port.</p>
     </section>
 
@@ -367,22 +367,25 @@
     <section aria-labelledby="fast">
       <h2 id="fast">What made it fast</h2>
       <p class="intro">MacMimic is the XMimic recipe retuned for the time to the target on one Mac. The changes that held
-        up across runs:</p>
+        up across runs, the largest first:</p>
       <div class="tablewrap">
         <table>
           <thead><tr><th scope="col">Change</th><th scope="col">Effect</th></tr></thead>
           <tbody>
+            <tr><td>The world model trained at 8 times the step size</td><td>it learns the robot's physics faster; failing clips are cleared about 300 iterations earlier, at no extra cost</td></tr>
+            <tr><td>3 world-model updates per iteration instead of 5</td><td>enough at that step size: 19% less time per iteration</td></tr>
+            <tr><td>From iteration 400, a larger policy batch (1,280), with 10% of the imagined rollouts started where the probes find failures</td><td>uses the GPU while the CPU is busy with the probes; the hardest clip, a cartwheel, is learned earlier</td></tr>
             <tr><td>Simulator and learner on separate threads, bf16 where this GPU runs it faster</td><td>0.61 to 0.65&ndash;0.76 iterations per second for the same algorithm</td></tr>
-            <tr><td>Half the policy batch (1,024 samples)</td><td>38% less time per iteration for about 200 more iterations: faster overall</td></tr>
-            <tr><td>Step-size decay from iteration 1,100 instead of 1,400</td><td>recovers about 100 iterations of the smaller batch's deficit</td></tr>
+            <tr><td>A smaller policy batch than BlinkMimic's 2,048: 1,024 samples, 1,280 from iteration 400</td><td>much less time per iteration for some more iterations: faster overall</td></tr>
+            <tr><td>Policy step-size decay from iteration 800 instead of 1,400</td><td>the return rises about 100 iterations earlier</td></tr>
             <tr><td>Evaluation probes from iteration 400, every 60, on a worker thread</td><td>failing clips are found and practised earlier, without stalling the GPU</td></tr>
             <tr><td>Rotation math unrolled into fusable operations</td><td>forward kinematics and reward 5&ndash;8 times faster in isolation</td></tr>
             <tr><td>A faster-moving policy average (0.99)</td><td>fewer clips failing late in training</td></tr>
-            <tr><td>Next batches gathered while the GPU is busy</td><td>2.5% more iterations per second, results bit-identical</td></tr>
+            <tr><td>Next batches gathered while the GPU is busy; LayerNorm on bf16 activations</td><td>2.5% and about 3% more iterations per second</td></tr>
           </tbody>
         </table>
       </div>
-      <p class="after">The experiments that did not help are recorded too, more than 50 training runs in all:
+      <p class="after">The experiments that did not help are recorded too, more than 100 training runs in all:
         <a href="https://github.com/air23zj/macmimic/blob/main/docs/macmimic_hillclimb.md">what worked and what didn't</a>.</p>
     </section>
 
@@ -391,11 +394,12 @@
       <ul class="notes">
         <li>The baselines are this repository's ports of BlinkMimic and XMimic to MLX, timed on the same MacBook. This is not
           a comparison with the original CUDA code on an NVIDIA GPU.</li>
-        <li>MacMimic's time is the mean of three runs with different seeds (27.9 to 30.1 minutes). The baselines are one run
-          each. Between seeds, the iteration at which the target is reached varies by about 100.</li>
+        <li>MacMimic's time is the mean of three runs with different seeds (21.0 to 22.5 minutes; the slowest alone is 1.95
+          times faster than the BlinkMimic port). The baselines are one run each. Between seeds, the iteration at which the
+          target is reached varies by about 100.</li>
         <li>The target is a threshold, and a run that has just crossed it tracks a little less precisely than one that crossed
-          it earlier. To match BlinkMimic's tracking at its target (return 0.847, 3.9 cm average body position error),
-          MacMimic needs about 34&ndash;35 minutes, 1.25 times faster.</li>
+          it later. At its target MacMimic tracks with a return of 0.822 and 4.4 cm average body position error, BlinkMimic
+          with 0.847 and 3.9 cm; the time to equal tracking quality was not measured for this version.</li>
         <li>Everything here is simulation. The policy has not been run on a physical robot.</li>
       </ul>
     </section>
@@ -408,10 +412,10 @@ cd macmimic
 uv sync
 bash tools/download_data.sh   <span class="c"># motion clips and robot model</span>
 uv run python tools/urdf_to_mjcf.py
-bash scripts/train.sh macmimic logs/macmimic_s0 --seed 0</code></pre>
+bash scripts/train.sh macmimic2 logs/macmimic2_s0 --seed 0</code></pre>
         <div>
           <p>You need a Mac with Apple silicon, <a href="https://docs.astral.sh/uv/">uv</a> and curl. The full 2,000
-            iterations take about 35 minutes on an M4 Pro; the target is usually reached by iteration 1,700. Settings that
+            iterations take about 30 minutes on an M4 Pro; the target is usually reached by iteration 1,400&ndash;1,500. Settings that
             only affect speed and memory are chosen automatically for the Mac you run on.</p>
           <p>The same repository trains SuperMimic, BlinkMimic and XMimic (<code>--preset</code>), evaluates checkpoints and
             renders videos like the one above.</p>
