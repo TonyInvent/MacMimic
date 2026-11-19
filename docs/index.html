@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacMimic: humanoid motion tracking trained in 29 minutes on a MacBook</title>
+<meta name="description" content="MacMimic trains a whole-body motion-tracking policy for the Unitree G1 on Apple silicon: MuJoCo on the CPU, a differentiable world model in MLX on the GPU. 29 minutes to the benchmark target on a MacBook Pro. Open source, MIT.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="MacMimic: a simulated humanoid learns 40 motions in 29 minutes on a MacBook">
+<meta property="og:description" content="Whole-body motion tracking for the Unitree G1, trained end to end on Apple silicon with MLX and MuJoCo. No CUDA, no cloud. Open source.">
+<meta property="og:url" content="https://air23zj.github.io/macmimic/">
+<meta property="og:image" content="https://air23zj.github.io/macmimic/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MacMimic: a simulated humanoid learns 40 motions in 29 minutes on a MacBook">
+<meta name="twitter:description" content="Whole-body motion tracking for the Unitree G1, trained end to end on Apple silicon with MLX and MuJoCo. Open source.">
+<meta name="twitter:image" content="https://air23zj.github.io/macmimic/assets/og.png">
+<meta name="theme-color" content="#e6e7e9">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --alu: #e6e7e9;          /* page: aluminium */
+    --alu-raised: #f1f2f3;   /* code, table header */
+    --ink: #1b1d21;
+    --ink-2: #4b515b;
+    --line: #c8cbd0;
+    --link: #1f56c2;         /* the reference blue, stepped for text on aluminium */
+    --screen: #0f1115;       /* the dark panels that hold renders and the chart */
+    --screen-ink: #eef0f3;
+    --screen-ink-2: #a3a9b3;
+    --screen-line: #262a31;
+    --accent: #3987e5;       /* MacMimic in the chart (validated on --screen) */
+    --muted-bar: #5b616b;    /* baselines in the chart */
+    --btn-ink: #ffffff;
+    --focus: #1f56c2;
+    --wide: "wdth" 125;
+    --measure: 68ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --alu: #17191d;
+      --alu-raised: #20232a;
+      --ink: #e9ebee;
+      --ink-2: #a7adb7;
+      --line: #30343c;
+      --link: #79a9f2;
+      --screen: #0b0d10;
+      --screen-line: #2a2f37;
+      --focus: #79a9f2;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--alu);
+    color: var(--ink);
+    font-family: "Archivo", system-ui, -apple-system, sans-serif;
+    font-variation-settings: "wdth" 100;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  a { color: var(--link); text-underline-offset: 0.18em; }
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--focus); outline-offset: 3px; border-radius: 4px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+  /* top bar */
+  .bar { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .mark {
+    font-weight: 800; font-variation-settings: var(--wide); font-size: 19px; letter-spacing: -0.01em;
+    color: var(--ink); text-decoration: none;
+  }
+  .bar nav { display: flex; gap: 22px; font-size: 15px; }
+  .bar nav a { color: var(--ink); text-decoration: none; }
+  .bar nav a:hover { text-decoration: underline; }
+
+  /* hero */
+  .hero { display: grid; grid-template-columns: 11fr 13fr; gap: 48px; align-items: center; padding: 36px 0 72px; }
+  h1 {
+    margin: 0 0 22px;
+    font-weight: 850; font-variation-settings: "wdth" 116;
+    font-size: clamp(32px, 3.3vw, 48px); line-height: 1.05; letter-spacing: -0.02em;
+  }
+  .lede { margin: 0 0 30px; color: var(--ink-2); font-size: 18px; max-width: 46ch; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-block; padding: 12px 20px; border-radius: 999px; font-weight: 650; font-size: 16px;
+    text-decoration: none; border: 1.5px solid var(--ink); color: var(--ink);
+  }
+  .btn.primary { background: var(--ink); color: var(--alu); }
+  .btn:hover { background: var(--ink); color: var(--alu); }
+  .btn.primary:hover { background: transparent; color: var(--ink); }
+
+  .screen {
+    background: var(--screen); color: var(--screen-ink); border-radius: 18px; overflow: hidden;
+    box-shadow: 0 0 0 1px var(--screen-line), 0 30px 60px -30px rgba(15, 17, 21, 0.55);
+  }
+  .screen video, .screen img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: var(--screen); }
+  figure { margin: 0; }
+  figcaption { color: var(--ink-2); font-size: 14.5px; margin-top: 14px; max-width: 70ch; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: 0; margin: 0 4px 0 2px; }
+
+  /* sections */
+  section { padding: 64px 0; border-top: 1px solid var(--line); }
+  h2 {
+    margin: 0 0 14px; font-weight: 800; font-variation-settings: "wdth" 112;
+    font-size: clamp(26px, 2.6vw, 34px); line-height: 1.12; letter-spacing: -0.015em;
+  }
+  .intro { color: var(--ink-2); max-width: var(--measure); margin: 0 0 32px; }
+  p { max-width: var(--measure); }
+
+  /* chart */
+  .chart { padding: 28px 28px 20px; position: relative; }
+  .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart svg.narrow { display: none; }
+  @media (max-width: 600px) { .chart svg.wide { display: none; } .chart svg.narrow { display: block; } }
+  .chart .row { cursor: default; }
+  .chart .row:focus-visible { outline: none; }
+  .chart .row:focus-visible .hit { stroke: var(--screen-ink); stroke-width: 1.5; }
+  .chart .tick { fill: var(--screen-ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .chart .name { fill: var(--screen-ink); font-size: 15px; font-weight: 650; }
+  .chart .sub { fill: var(--screen-ink-2); font-size: 12.5px; font-weight: 400; }
+  .chart .val { fill: var(--screen-ink); font-size: 14.5px; font-weight: 650; }
+  .chart .val.in { font-weight: 550; }
+  .tip {
+    position: absolute; pointer-events: none; background: #1d2027; color: var(--screen-ink);
+    border: 1px solid #343944; border-radius: 10px; padding: 10px 12px; font-size: 13.5px; line-height: 1.45;
+    max-width: 290px; opacity: 0; transform: translateY(4px); transition: opacity .12s, transform .12s;
+  }
+  .tip.on { opacity: 1; transform: none; }
+  .tip b { font-weight: 650; }
+  .after { margin-top: 22px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* how it works */
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; counter-reset: s; }
+  .steps li { counter-increment: s; border-top: 2px solid var(--ink); padding-top: 16px; }
+  .steps li::before {
+    content: counter(s); display: block; font-weight: 850; font-variation-settings: var(--wide);
+    font-size: 30px; line-height: 1; margin-bottom: 12px;
+  }
+  .steps h3 { margin: 0 0 8px; font-size: 19px; font-weight: 700; }
+  .steps p { margin: 0; color: var(--ink-2); font-size: 16px; }
+  .loopnote { margin-top: 28px; color: var(--ink-2); font-size: 15.5px; }
+
+  /* table */
+  .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; width: 100%; font-size: 16px; }
+  th, td { text-align: left; vertical-align: top; padding: 13px 16px 13px 0; border-bottom: 1px solid var(--line); }
+  th { font-weight: 650; font-size: 14.5px; color: var(--ink-2); }
+  td:first-child { font-weight: 600; width: 44%; }
+  td code, p code, li code { font-size: 0.9em; }
+
+  /* notes */
+  .notes { margin: 0; padding-left: 1.1em; max-width: var(--measure); }
+  .notes li { margin: 0 0 10px; }
+
+  /* quickstart */
+  pre {
+    margin: 0; background: var(--screen); color: var(--screen-ink); border-radius: 14px; padding: 22px 24px;
+    overflow-x: auto; font-size: 14.5px; line-height: 1.7;
+    box-shadow: 0 0 0 1px var(--screen-line);
+  }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  pre .c { color: var(--screen-ink-2); }
+  .qs { display: grid; grid-template-columns: 7fr 5fr; gap: 40px; align-items: start; }
+  .hero > *, .qs > *, .steps > li { min-width: 0; }  /* long code lines scroll inside their block, not the page */
+  .qs p { margin-top: 0; }
+
+  .credits { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 40px; margin: 0; padding: 0; list-style: none; }
+  .credits li { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15.5px; }
+  .credits span { color: var(--ink-2); }
+
+  footer { padding: 36px 0 56px; color: var(--ink-2); font-size: 14.5px; border-top: 1px solid var(--line); }
+  footer p { margin: 0 0 6px; }
+
+  @media (max-width: 920px) {
+    .hero { grid-template-columns: 1fr; gap: 32px; padding-top: 12px; }
+    .steps { grid-template-columns: 1fr; gap: 28px; }
+    .qs { grid-template-columns: 1fr; gap: 20px; }
+    .credits { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    body { font-size: 16px; }
+    .bar nav { gap: 16px; }
+    .chart { padding: 18px 14px 12px; }
+    section { padding: 48px 0; }
+    td:first-child { width: 50%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tip { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar">
+    <a class="mark" href="./">MacMimic</a>
+    <nav aria-label="Primary">
+      <a href="#quickstart">Quickstart</a>
+      <a href="https://github.com/air23zj/macmimic">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div>
+        <h1>Teach a simulated humanoid 40 motions in 29&nbsp;minutes, on a MacBook.</h1>
+        <p class="lede">MacMimic trains a whole-body motion-tracking policy for the Unitree G1 entirely on Apple silicon:
+          MuJoCo simulates 4,096 robots on the CPU while MLX trains a differentiable world model and the policy on the GPU.
+          No CUDA, no cloud, MIT licensed.</p>
+        <div class="actions">
+          <a class="btn primary" href="https://github.com/air23zj/macmimic">View the code</a>
+          <a class="btn" href="#quickstart">Train it yourself</a>
+        </div>
+      </div>
+      <figure>
+        <div class="screen">
+          <video id="hero-video" src="assets/hero.mp4" poster="assets/poster.jpg" muted loop playsinline preload="metadata"
+            aria-label="The simulated Unitree G1, in white, tracking a cartwheel, a get-up, a sprint, a dance and jumps next to the human reference motion, in blue."></video>
+        </div>
+        <figcaption>The policy after 29 minutes of training on a MacBook Pro (M4 Pro), tracking motions from its 40-clip
+          training set. White: the simulated robot. <span class="swatch" style="background:#4d8cff" aria-hidden="true"></span>Blue: the human
+          motion it follows. Each clip is simulated from its first frame, as in the evaluation.</figcaption>
+      </figure>
+    </div>
+
+    <section aria-labelledby="race">
+      <h2 id="race">Time to the benchmark target</h2>
+      <p class="intro">The target: an average tracking return of at least 0.82 with none of the 40 clips failing, held
+        for three checkpoints in a row. All runs used the same MacBook and the same simulator, rewards and evaluation.</p>
+      <figure>
+        <div class="screen chart" id="chart">
+          <svg class="wide" viewBox="0 0 720 236" role="img" aria-labelledby="chart-title chart-desc">
+            <title id="chart-title">Minutes to the benchmark target on a MacBook Pro (M4 Pro), lower is better</title>
+            <desc id="chart-desc">MacMimic: 29 minutes, mean of 3 runs (27.9, 29.2 and 30.1). BlinkMimic port: 44.0 minutes, 1 run. XMimic port: target not reached in 57 minutes, 1 run.</desc>
+            <!-- plot: x 176..696 = 0..60 min (8.667 px per minute) -->
+            <g stroke="#262a31" stroke-width="1">
+              <line x1="176" y1="14" x2="176" y2="196"/>
+              <line x1="306" y1="14" x2="306" y2="196"/>
+              <line x1="436" y1="14" x2="436" y2="196"/>
+              <line x1="566" y1="14" x2="566" y2="196"/>
+              <line x1="696" y1="14" x2="696" y2="196"/>
+            </g>
+            <g text-anchor="middle">
+              <text class="tick" x="176" y="218">0</text>
+              <text class="tick" x="306" y="218">15</text>
+              <text class="tick" x="436" y="218">30</text>
+              <text class="tick" x="566" y="218">45</text>
+              <text class="tick" x="696" y="218">60 min</text>
+            </g>
+            <defs>
+              <linearGradient id="fade" x1="0" x2="1">
+                <stop offset="0" stop-color="#5b616b"/>
+                <stop offset="0.86" stop-color="#5b616b"/>
+                <stop offset="1" stop-color="#5b616b" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+
+            <g class="row" tabindex="0" data-tip="&lt;b&gt;MacMimic&lt;/b&gt;, this repository&lt;br&gt;3 runs: 27.9, 29.2 and 30.1 min (iteration 1,600 to 1,700)&lt;br&gt;0.94 to 0.97 iterations per second">
+              <rect class="hit" x="0" y="20" width="720" height="44" fill="transparent" rx="6"/>
+              <text class="name" x="0" y="40">MacMimic</text>
+              <text class="sub" x="0" y="57">3 runs</text>
+              <path d="M176 31 H424 Q428 31 428 35 V49 Q428 53 424 53 H176 Z" fill="#3987e5"/>
+              <text class="val" x="438" y="47">29 min</text>
+            </g>
+            <g class="row" tabindex="0" data-tip="&lt;b&gt;BlinkMimic port&lt;/b&gt;, the same algorithm in this repository&lt;br&gt;1 run: 44.0 min (iteration 1,600)&lt;br&gt;0.61 iterations per second">
+              <rect class="hit" x="0" y="80" width="720" height="44" fill="transparent" rx="6"/>
+              <text class="name" x="0" y="100">BlinkMimic port</text>
+              <text class="sub" x="0" y="117">1 run</text>
+              <path d="M176 91 H553 Q557 91 557 95 V109 Q557 113 553 113 H176 Z" fill="#5b616b"/>
+              <text class="val" x="567" y="107">44 min</text>
+            </g>
+            <g class="row" tabindex="0" data-tip="&lt;b&gt;XMimic port&lt;/b&gt;, actor and learner split on one Mac&lt;br&gt;1 run: target not reached by 57 min (first clean checkpoint at 54.2 min)&lt;br&gt;0.65 iterations per second">
+              <rect class="hit" x="0" y="140" width="720" height="44" fill="transparent" rx="6"/>
+              <text class="name" x="0" y="160">XMimic port</text>
+              <text class="sub" x="0" y="177">1 run</text>
+              <rect x="176" y="151" width="494" height="22" fill="url(#fade)"/>
+              <text class="val in" x="604" y="167" text-anchor="end">not reached in 57 min</text>
+            </g>
+          </svg>
+          <!-- narrow screens: names above the bars; plot x 0..300 = 0..60 min (5 px per minute) -->
+          <svg class="narrow" viewBox="0 0 340 214" role="img" aria-labelledby="chart-title-n chart-desc-n">
+            <title id="chart-title-n">Minutes to the benchmark target on a MacBook Pro (M4 Pro), lower is better</title>
+            <desc id="chart-desc-n">MacMimic: 29 minutes, mean of 3 runs (27.9, 29.2 and 30.1). BlinkMimic port: 44.0 minutes, 1 run. XMimic port: target not reached in 57 minutes, 1 run.</desc>
+            <g stroke="#262a31" stroke-width="1">
+              <line x1="0.5" y1="30" x2="0.5" y2="182"/>
+              <line x1="75" y1="30" x2="75" y2="182"/>
+              <line x1="150" y1="30" x2="150" y2="182"/>
+              <line x1="225" y1="30" x2="225" y2="182"/>
+              <line x1="300" y1="30" x2="300" y2="182"/>
+            </g>
+            <g text-anchor="middle">
+              <text class="tick" x="4" y="202">0</text>
+              <text class="tick" x="75" y="202">15</text>
+              <text class="tick" x="150" y="202">30</text>
+              <text class="tick" x="225" y="202">45</text>
+              <text class="tick" x="306" y="202">60 min</text>
+            </g>
+            <defs>
+              <linearGradient id="fade-n" x1="0" x2="1">
+                <stop offset="0" stop-color="#5b616b"/>
+                <stop offset="0.86" stop-color="#5b616b"/>
+                <stop offset="1" stop-color="#5b616b" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <g class="row" tabindex="0" data-tip="&lt;b&gt;MacMimic&lt;/b&gt;, this repository&lt;br&gt;3 runs: 27.9, 29.2 and 30.1 min (iteration 1,600 to 1,700)&lt;br&gt;0.94 to 0.97 iterations per second">
+              <rect class="hit" x="-4" y="0" width="344" height="58" fill="transparent" rx="6"/>
+              <text class="name" x="0" y="17">MacMimic <tspan class="sub">3 runs</tspan></text>
+              <path d="M0 28 H142 Q146 28 146 32 V44 Q146 48 142 48 H0 Z" fill="#3987e5"/>
+              <text class="val" x="154" y="43">29 min</text>
+            </g>
+            <g class="row" tabindex="0" data-tip="&lt;b&gt;BlinkMimic port&lt;/b&gt;, the same algorithm in this repository&lt;br&gt;1 run: 44.0 min (iteration 1,600)&lt;br&gt;0.61 iterations per second">
+              <rect class="hit" x="-4" y="62" width="344" height="58" fill="transparent" rx="6"/>
+              <text class="name" x="0" y="79">BlinkMimic port <tspan class="sub">1 run</tspan></text>
+              <path d="M0 90 H216 Q220 90 220 94 V106 Q220 110 216 110 H0 Z" fill="#5b616b"/>
+              <text class="val" x="228" y="105">44 min</text>
+            </g>
+            <g class="row" tabindex="0" data-tip="&lt;b&gt;XMimic port&lt;/b&gt;, actor and learner split on one Mac&lt;br&gt;1 run: target not reached by 57 min (first clean checkpoint at 54.2 min)&lt;br&gt;0.65 iterations per second">
+              <rect class="hit" x="-4" y="124" width="344" height="58" fill="transparent" rx="6"/>
+              <text class="name" x="0" y="141">XMimic port <tspan class="sub">1 run</tspan></text>
+              <rect x="0" y="152" width="285" height="20" fill="url(#fade-n)"/>
+              <text class="val in" x="248" y="167" text-anchor="end">not reached in 57 min</text>
+            </g>
+          </svg>
+          <div class="tip" id="tip" role="status" aria-live="polite"></div>
+        </div>
+        <figcaption>Hover, tap or focus a bar for details. Baselines are this repository's MLX ports of BlinkMimic and XMimic,
+          run on the same machine; full tables in <a href="https://github.com/air23zj/macmimic/blob/main/RESULTS.md">RESULTS.md</a>.</figcaption>
+      </figure>
+      <p class="after">MacMimic reaches the target 1.5 times faster than the BlinkMimic port and at least 1.95 times faster
+        than the XMimic port.</p>
+    </section>
+
+    <section aria-labelledby="how">
+      <h2 id="how">How it works</h2>
+      <p class="intro">The method is SuperMimic's, as refined by BlinkMimic: learn the physics, then learn the motion by
+        differentiating through the learned physics. Every iteration runs this loop.</p>
+      <ol class="steps">
+        <li>
+          <h3>Simulate</h3>
+          <p>4,096 copies of the G1 run in MuJoCo across the CPU cores, each tracking a stretch of a motion clip with the
+            current policy.</p>
+        </li>
+        <li>
+          <h3>Learn the physics</h3>
+          <p>A neural world model learns to predict the robot's next state from the simulator's data, on the GPU with MLX.</p>
+        </li>
+        <li>
+          <h3>Learn the motion</h3>
+          <p>The policy improves by backpropagating through 32 imagined steps of the world model, with a critic for the
+            longer term.</p>
+        </li>
+      </ol>
+      <p class="loopnote">The CPU and the GPU work at the same time, on separate threads, sharing the Mac's unified memory.</p>
+    </section>
+
+    <section aria-labelledby="fast">
+      <h2 id="fast">What made it fast</h2>
+      <p class="intro">MacMimic is the XMimic recipe retuned for the time to the target on one Mac. The changes that held
+        up across runs:</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th scope="col">Change</th><th scope="col">Effect</th></tr></thead>
+          <tbody>
+            <tr><td>Simulator and learner on separate threads, bf16 where this GPU runs it faster</td><td>0.61 to 0.65&ndash;0.76 iterations per second for the same algorithm</td></tr>
+            <tr><td>Half the policy batch (1,024 samples)</td><td>38% less time per iteration for about 200 more iterations: faster overall</td></tr>
+            <tr><td>Step-size decay from iteration 1,100 instead of 1,400</td><td>recovers about 100 iterations of the smaller batch's deficit</td></tr>
+            <tr><td>Evaluation probes from iteration 400, every 60, on a worker thread</td><td>failing clips are found and practised earlier, without stalling the GPU</td></tr>
+            <tr><td>Rotation math unrolled into fusable operations</td><td>forward kinematics and reward 5&ndash;8 times faster in isolation</td></tr>
+            <tr><td>A faster-moving policy average (0.99)</td><td>fewer clips failing late in training</td></tr>
+            <tr><td>Next batches gathered while the GPU is busy</td><td>2.5% more iterations per second, results bit-identical</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="after">The experiments that did not help are recorded too, more than 50 training runs in all:
+        <a href="https://github.com/air23zj/macmimic/blob/main/docs/macmimic_hillclimb.md">what worked and what didn't</a>.</p>
+    </section>
+
+    <section aria-labelledby="numbers">
+      <h2 id="numbers">About these numbers</h2>
+      <ul class="notes">
+        <li>The baselines are this repository's ports of BlinkMimic and XMimic to MLX, timed on the same MacBook. This is not
+          a comparison with the original CUDA code on an NVIDIA GPU.</li>
+        <li>MacMimic's time is the mean of three runs with different seeds (27.9 to 30.1 minutes). The baselines are one run
+          each. Between seeds, the iteration at which the target is reached varies by about 100.</li>
+        <li>The target is a threshold, and a run that has just crossed it tracks a little less precisely than one that crossed
+          it earlier. To match BlinkMimic's tracking at its target (return 0.847, 3.9 cm average body position error),
+          MacMimic needs about 34&ndash;35 minutes, 1.25 times faster.</li>
+        <li>Everything here is simulation. The policy has not been run on a physical robot.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="quickstart">
+      <h2 id="quickstart">Train it yourself</h2>
+      <div class="qs">
+        <pre><code>git clone https://github.com/air23zj/macmimic
+cd macmimic
+uv sync
+bash tools/download_data.sh   <span class="c"># motion clips and robot model</span>
+uv run python tools/urdf_to_mjcf.py
+bash scripts/train.sh macmimic logs/macmimic_s0 --seed 0</code></pre>
+        <div>
+          <p>You need a Mac with Apple silicon, <a href="https://docs.astral.sh/uv/">uv</a> and curl. The full 2,000
+            iterations take about 35 minutes on an M4 Pro; the target is usually reached by iteration 1,700. Settings that
+            only affect speed and memory are chosen automatically for the Mac you run on.</p>
+          <p>The same repository trains SuperMimic, BlinkMimic and XMimic (<code>--preset</code>), evaluates checkpoints and
+            renders videos like the one above.</p>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="credits">
+      <h2 id="credits">Built on</h2>
+      <ul class="credits">
+        <li><a href="https://github.com/fuyichen0725/blinkmimic">BlinkMimic</a> <span>the algorithm and presets ported here (MIT)</span></li>
+        <li><a href="https://github.com/HybridRobotics/supermimic">SuperMimic</a> <span>the method, Liao et al. 2026 (Apache-2.0)</span></li>
+        <li><a href="https://github.com/nico-bohlinger/xmimic">XMimic</a> <span>the actor and learner split</span></li>
+        <li><a href="https://github.com/zita-ch/supermimic_vibed">supermimic_vibed</a> and <a href="https://github.com/Huy-Quang-Dao/instantTrack">InstantTrack</a> <span>code BlinkMimic builds on (MIT)</span></li>
+        <li><a href="https://github.com/ml-explore/mlx">MLX</a> and <a href="https://mujoco.org">MuJoCo</a> <span>learning on the GPU, simulation on the CPU</span></li>
+        <li>LAFAN1 by Ubisoft La Forge, G1 by Unitree <span>motions (CC BY-NC-ND 4.0) and robot model (BSD-3-Clause)</span></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>Code under the MIT License. The motion data are downloaded at setup and not redistributed; videos and checkpoints
+      derived from LAFAN1 are for non-commercial research use.</p>
+    <p><a href="https://github.com/air23zj/macmimic">github.com/air23zj/macmimic</a></p>
+  </footer>
+</div>
+
+<script>
+  // The hero video plays muted in a loop, unless the viewer asked for reduced motion.
+  (function () {
+    var v = document.getElementById("hero-video");
+    var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) { v.controls = true; v.removeAttribute("loop"); return; }
+    v.autoplay = true;
+    var p = v.play();
+    if (p && p.catch) p.catch(function () { v.controls = true; });
+  })();
+
+  // Chart tooltips on hover and keyboard focus.
+  (function () {
+    var box = document.getElementById("chart"), tip = document.getElementById("tip");
+    function show(row, x, y) {
+      tip.innerHTML = row.getAttribute("data-tip");
+      tip.classList.add("on");
+      var b = box.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+      var left = Math.min(Math.max(x - b.left - w / 2, 8), b.width - w - 8);
+      var top = y - b.top - h - 14;
+      if (top < 4) top = y - b.top + 18;
+      tip.style.left = left + "px"; tip.style.top = top + "px";
+    }
+    function hide() { tip.classList.remove("on"); }
+    box.querySelectorAll(".row").forEach(function (row) {
+      row.addEventListener("pointermove", function (e) { show(row, e.clientX, e.clientY); });
+      row.addEventListener("pointerleave", hide);
+      row.addEventListener("focus", function () {
+        var r = row.querySelector(".hit").getBoundingClientRect();
+        show(row, r.left + r.width / 2, r.top);
+      });
+      row.addEventListener("blur", hide);
+      row.addEventListener("click", function (e) { show(row, e.clientX, e.clientY); });
+    });
+  })();
+</script>
+</body>
+</html>

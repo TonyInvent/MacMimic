@@ -63,10 +63,10 @@ def newton_schulz(G: mx.array, steps: int = 5, eps: float = 1e-7) -> mx.array:
 class MuonAdam:
     """Muon on the parameters named in ``muon_paths``, Adam (betas) on all others. ``muon_paths`` empty = plain Adam."""
 
-    def __init__(self, params: dict, muon_paths=(), betas=(0.9, 0.999), eps: float = 1e-8, momentum: float = 0.95):
+    def __init__(self, params: dict, muon_paths=(), betas=(0.9, 0.999), eps: float = 1e-8, momentum: float = 0.95, ns_steps: int = 5):
         self.muon_paths = set(muon_paths)
         assert self.muon_paths <= set(params), self.muon_paths - set(params)
-        self.b1, self.b2, self.eps, self.mom = betas[0], betas[1], eps, momentum
+        self.b1, self.b2, self.eps, self.mom, self.ns_steps = betas[0], betas[1], eps, momentum, ns_steps
         self.state = {"t": mx.zeros(()), "m": {}, "v": {}, "buf": {}}
         for k, p in params.items():
             if k in self.muon_paths:
@@ -87,7 +87,7 @@ class MuonAdam:
             if k in self.muon_paths:
                 buf = st["buf"][k]
                 b = buf + (1 - self.mom) * (g - buf)
-                upd = newton_schulz(g + self.mom * (b - g))
+                upd = newton_schulz(g + self.mom * (b - g), steps=self.ns_steps)
                 ratio = 0.2 * math.sqrt(max(p.shape[0], p.shape[1]))
                 out[k] = mx.where(okf, p - lr * ratio * upd, p)
                 st["buf"][k] = mx.where(okf, b, buf)

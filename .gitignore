@@ -223,3 +223,7 @@ __marimo__/
 data/
 logs/
 *.mjb
+
+# launch drafts (posts, media sources, checklist): kept local
+launch/
+MUJOCO_LOG.TXT

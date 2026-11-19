@@ -24,6 +24,17 @@ def set_compute_dtype(dt) -> None:
     COMPUTE_DTYPE = dt
 
 
+# --ln_bf16: under bf16 autocast, LayerNorm reads the bf16 matmul output (mx.fast.layer_norm accumulates in fp32) and
+# the activation after it runs in bf16, instead of both on an fp32 copy: half the memory traffic of the world model's
+# normalized layers, rounding before the activation instead of after it
+LN_LOWP = False
+
+
+def set_ln_lowp(on: bool) -> None:
+    global LN_LOWP
+    LN_LOWP = on
+
+
 def elu(x: mx.array) -> mx.array:
     """ELU with a backward pass that stays finite: nn.elu's untaken branch exp(x) overflows for x > ~88, and its
     gradient inf * 0 = NaN then poisons every weight gradient. Same forward values."""
@@ -53,7 +64,10 @@ class MLP(nn.Module):
             x = mx.addmm(l.bias.astype(dt), x, l.weight.astype(dt).T)
             if i == len(self.layers) - 1:
                 break
-            if self.norms:  # autocast: LayerNorm and the activation after it in fp32, rounded at the next matmul
+            if self.norms and LN_LOWP:
+                n = self.norms[i]
+                x = self.act(mx.fast.layer_norm(x, n.weight.astype(dt), n.bias.astype(dt), n.eps))
+            elif self.norms:  # autocast: LayerNorm and the activation after it in fp32, rounded at the next matmul
                 x = self.act(self.norms[i](x.astype(mx.float32))).astype(dt)
             else:  # autocast: the activation of a bf16 Linear output stays bf16
                 x = self.act(x)

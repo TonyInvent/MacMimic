@@ -30,6 +30,7 @@ p.add_argument("--breakdown", action="store_true", help="split the world-model u
 p.add_argument("--enc_hidden", type=str, default="2048,1024,512,256")
 p.add_argument("--dec_hidden", type=str, default="2048,1024,512,256")
 p.add_argument("--skip_gemm", action="store_true")
+p.add_argument("--wm_hidden", type=str, default="1024,1024,1024")
 a = p.parse_args()
 dt = mx.float32 if a.fp32 else mx.bfloat16
 if not a.fp32:
@@ -79,7 +80,7 @@ lay = XiLayout()
 mdp = MDP(kin, motion, lay.dim)
 G = motion.goal_dim(K)
 pi = Policy(mdp.obs_dim, G, J, enc_hidden=tuple(int(x) for x in a.enc_hidden.split(",")), dec_hidden=tuple(int(x) for x in a.dec_hidden.split(",")), ref_skip=None)
-wm = WorldModel(J, lay.dim, hidden=(1024, 1024, 1024), structured=True)
+wm = WorldModel(J, lay.dim, hidden=tuple(int(x) for x in a.wm_hidden.split(",")), structured=True)
 critic = Critic(inv_dim(J) + mdp.critic_extra + G)
 mx.eval(pi.parameters(), wm.parameters(), critic.parameters())
 rng = np.random.default_rng(0)

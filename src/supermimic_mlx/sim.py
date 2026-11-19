@@ -121,6 +121,7 @@ class TrackingSim:
         self._reward_fn_cpu = mx.compile(self._reward_term)  # traced separately on the CPU stream (compiled graphs keep their stream)
         self.cpu = False  # reward / termination heads on the CPU (train.py --actor_device cpu)
         self.term_only = False  # termination only, in numpy, no reward (train.py's probe sweep: no GPU round trip)
+        self.term_prob = 1.0  # training worlds: a world past the termination thresholds ends with this probability per step
         self._ref_z = np.array(motion.root_p[:, 2], dtype=np.float32)
         self._ref_r22 = np.array(motion.root_R[:, 2, 2], dtype=np.float32)
         self.t_physics = 0.0  # accumulated seconds in batch.step (profiling)
@@ -247,6 +248,8 @@ class TrackingSim:
         else:
             r, term = self._reward_fn(mx.array(s1), mx.array(f1.astype(np.int32)), mx.array(a_np), mx.array(a_prev))
         r, term = np.asarray(r, dtype=np.float64), np.asarray(term)
+        if self.term_prob < 1.0 and not self.eval_mode:
+            term = term & (self.rng.random(len(term)) < self.term_prob)
         # a diverged world (non-finite state; MuJoCo's auto-reset is off, see scene.apply_options), a non-finite action
         # or reward ends the episode as a failure; the world is rolled back to its last finite state, so the stored
         # transition is a standstill and an evaluation world stays frozen (failed) instead of stepping NaNs

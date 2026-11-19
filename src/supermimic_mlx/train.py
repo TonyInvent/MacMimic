@@ -12,6 +12,7 @@ streams) have no MLX counterpart and are absent; mx.compile plays their role.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import os
@@ -44,6 +45,13 @@ PRESETS["xmimic"] = dict(PRESETS["blinkmimic"], overlap=True)
 PRESETS["macmimic"] = dict(PRESETS["xmimic"], pi_batch=1024, pi_ema=0.99, lr_decay_by=1100, iterations=2000,
                            eprobe_start=400, eprobe_every=60, eprobe_tile=600, eprobe_share=0.3, eprobe_lead_min=100,
                            eprobe_lead_max=200, eprobe_np_term=True, eprobe_thread=True)
+# MacMimic 2 (2026-11-18, docs/macmimic_hillclimb.md): the world model at 8x the step size learns enough from 3 updates per
+# iteration instead of 5 (-19% per iteration); bf16 LayerNorm; the step-size decay from it 800; from it 400, when the probe
+# sweeps make the CPU the bottleneck and the GPU has slack, a policy batch of 1280, whose return margin pays for 10% of the
+# policy's imagination starts drawn from the probe failures' windows (clears the hard clip dance1_subject1 earlier).
+# Strict target (return >= 0.82, 0 failed clips, 3 checkpoints) at it 1400 / 1400 / 1500, 21.3 / 21.0 / 22.5 min on seeds 0-2.
+PRESETS["macmimic2"] = dict(PRESETS["macmimic"], wm_lr_mult=8.0, wm_batches=3, ln_bf16=True, lr_decay_by=800, pi_batch=1280,
+                            pi_batch_warm=1024, pi_batch_switch=400, focus_replay=0.1)
 # fine-tuning a pretrained (MuJoCo) run in SuperDex Physics: use with --init_from <run_dir>. Few worlds (SuperDex is
 # ~15x slower per world), the world model adapts first (--wm_only_iters), the policy at the base learning rate; the
 # source run's network flags are taken over by --init_from
@@ -60,6 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     a("--iterations", type=int, default=320_000)
     a("--buffer_steps", type=int, default=1000)
     a("--utd", type=float, default=0.4, help="updates per vectorized simulator step")
+    a("--utd_late", type=float, default=0.0, help="the --utd from iteration --utd_late_from on (0 = unchanged)")
+    a("--utd_late_from", type=int, default=0)
     a("--horizon", type=int, default=32)
     a("--goal_frames", type=int, default=10)
     a("--hist", type=int, default=10)
@@ -102,6 +112,25 @@ def build_parser() -> argparse.ArgumentParser:
     a("--pi_lr_mult", type=float, default=1.0)
     a("--lr_decay_ret", type=float, default=0.0)
     a("--lr_decay_len", type=int, default=300)
+    a("--term_prob", type=float, default=1.0,
+      help="probabilistic termination while training (Stubborn, arXiv 2606.12814): a training world past the termination "
+           "thresholds ends with this probability per step, and the imagined termination probability is scaled the same "
+           "way, so rollouts continue through a hard move instead of stopping at its entry. Probes and the evaluation "
+           "keep the hard criterion (1 = hard everywhere)")
+    a("--term_prob_until", type=int, default=0, help="--term_prob applies before this iteration, the hard criterion from it on (0: the whole run)")
+    a("--wm_lr_mult", type=float, default=1.0, help="world-model step size as a multiple of --lr")
+    a("--wm_ns_steps", type=int, default=5, help="Newton-Schulz iterations of the world model's Muon updates")
+    a("--pi_ns_steps", type=int, default=5, help="Newton-Schulz iterations of the policy's Muon updates")
+    a("--v_lr_mult", type=float, default=1.0, help="critic step size as a multiple of --lr")
+    a("--term_margin", type=float, default=1.0,
+      help="training termination thresholds (simulator, probes, imagination) x this from --term_margin_from; evaluation unchanged")
+    a("--term_margin_from", type=int, default=0)
+    a("--late_anneal_from", type=int, default=0, help="from this iteration, ramp the policy step size by --late_anneal_mult (0 = off)")
+    a("--late_anneal_mult", type=float, default=0.25)
+    a("--late_anneal_len", type=int, default=100)
+    a("--late_anneal_wm", action=argparse.BooleanOptionalAction, default=False, help="--late_anneal also for the world model")
+    a("--late_anneal_pi", action=argparse.BooleanOptionalAction, default=True, help="--late_anneal for the policy")
+    a("--pi_lr_final", type=float, default=1.0)  # the policy LR multiplier the decay ends at (1 = the base LR)
     a("--lr_decay_by", type=int, default=0)
     a("--ref_contact_fix", action=argparse.BooleanOptionalAction, default=False)
     a("--pi_ref_skip", action=argparse.BooleanOptionalAction, default=False)
@@ -114,6 +143,10 @@ def build_parser() -> argparse.ArgumentParser:
     a("--eprobe_win", type=int, default=10)
     a("--eprobe_decay", type=float, default=0.5)
     a("--eprobe_async", type=int, default=0, help="sweep steps per iteration (0: the whole sweep at once)")
+    a("--eprobe_until", type=int, default=0, help="no new probe sweep from this iteration on; the reset focus keeps its last state (0 = no limit)")
+    a("--eprobe_resume", type=int, default=0,
+      help="restart a failed probe world this many frames after its failure and keep sweeping its tile (0 = off: a "
+           "failure hides every later frame of the tile, and of the next tile when it lies in that tile's lead-in)")
     a("--learner_qos", action=argparse.BooleanOptionalAction, default=False,
       help="--overlap, macOS: run the learner thread (the GPU's feeder) at user-interactive QoS so the simulator's "
            "threads cannot delay it")
@@ -157,6 +190,9 @@ def build_parser() -> argparse.ArgumentParser:
       help="fine-tuning: start from the networks (world model, policy + EMA, critic, normalizers) of this run's last "
            "checkpoint, with fresh optimizers and schedules; its network flags are taken over")
     a("--reset_critic", action="store_true", help="--resume: start a fresh critic (and its optimizer); debugging")
+    a("--init_wm_only", action="store_true",
+      help="--init_from: take only the world model; the policy, its average and the critic start fresh (measures what a "
+           "pretrained world model buys; not a from-scratch comparison)")
     a("--sim_threads", type=int, default=None, help="default: all CPU cores")
     a("--probe_sim_threads", type=int, default=None, help="the probe sweep's simulator threads (default: --sim_threads)")
     a("--overlap", action=argparse.BooleanOptionalAction, default=False,
@@ -192,6 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     a("--actor_device", type=str, default="gpu", choices=["gpu", "cpu"],
       help="--overlap: run the actor's and the probe sweep's policy forwards on the CPU (fp32, MLX's CPU backend), so they "
            "do not queue behind the learner on the GPU")
+    a("--ln_bf16", action=argparse.BooleanOptionalAction, default=False, help="world-model LayerNorm on bf16 activations (see networks.LN_LOWP)")
     a("--fast_learner", action=argparse.BooleanOptionalAction, default=False,
       help="XMimic's learner hoisting: frames, goals and goal encodings of all imagined steps in one batch before the "
            "rollout; the windows of all world-model batches sampled at once and their updates in one compiled call")
@@ -269,6 +306,7 @@ print("[hw] " + ", ".join(f"{k} {v}" for k, v in HW.items() if k in ("chip", "p_
 print(f"[hw] sim_threads {args.sim_threads}, precision {args.precision}, checkpoint_bptt {args.checkpoint_bptt}", flush=True)
 if args.precision == "bf16":
     networks.set_compute_dtype(mx.bfloat16)
+    networks.set_ln_lowp(args.ln_bf16)
     import supermimic_mlx.optim as _optim
 
     if args.ns_bf16:
@@ -300,8 +338,8 @@ pi = policy_from_args(vars(args), mdp.obs_dim, GOAL_DIM, J)
 V_MAX = (MAX_STEP_REWARD + 2 * args.contact_reward * CONTROL_DT) / (1 - args.gamma)
 critic = Critic(CRITIC_IN, v_max=V_MAX if args.critic_clamp else None)
 mx.eval(wm.parameters(), pi.parameters(), critic.parameters(), ERR_FLOOR if "ERR_FLOOR" in globals() else ())
-opt_wm = MuonAdam(flat(wm.trainable_parameters()), wm.muon_paths() if args.wm_opt == "muon" else (), betas=(0.9, 0.999))
-opt_pi = MuonAdam(flat(pi.trainable_parameters()), pi.muon_paths() if args.pi_opt == "muon" else (), betas=(args.pi_beta1, 0.95))
+opt_wm = MuonAdam(flat(wm.trainable_parameters()), wm.muon_paths() if args.wm_opt == "muon" else (), betas=(0.9, 0.999), ns_steps=args.wm_ns_steps)
+opt_pi = MuonAdam(flat(pi.trainable_parameters()), pi.muon_paths() if args.pi_opt == "muon" else (), betas=(args.pi_beta1, 0.95), ns_steps=args.pi_ns_steps)
 opt_v = MuonAdam(flat(critic.trainable_parameters()), (), betas=(0.9, 0.999))
 EMA = {"p": flat(pi.parameters()), "n": 0} if args.pi_ema > 0 else None  # Polyak average of all policy arrays (+ norms)
 CTR = {"nonfinite": mx.zeros((), dtype=mx.int32)}
@@ -321,12 +359,15 @@ start_it, wall_offset, sim_steps = 0, 0.0, 0
 RESUME_CTRL = None
 if args.init_from:
     ck = load_tree(os.path.join(args.init_from, "last"))
-    wm.update(unflat(ck["wm"])), pi.update(unflat(ck["pi_live"])), critic.update(unflat(ck["critic"]))
-    if EMA is not None:
-        EMA["p"].update(ck.get("pi_avg", ck["pi_live"]))
-        EMA["n"] = 1  # continue the average from the pretrained one
+    wm.update(unflat(ck["wm"]))
+    if not args.init_wm_only:
+        pi.update(unflat(ck["pi_live"])), critic.update(unflat(ck["critic"]))
+        if EMA is not None:
+            EMA["p"].update(ck.get("pi_avg", ck["pi_live"]))
+            EMA["n"] = 1  # continue the average from the pretrained one
     mx.eval(wm.parameters(), pi.parameters(), critic.parameters(), EMA["p"] if EMA is not None else ())
-    print(f"--init_from {args.init_from}: networks of iteration {ck['meta']['iteration']} ({ck['meta']['args'].get('preset')})", flush=True)
+    what = "world model" if args.init_wm_only else "networks"
+    print(f"--init_from {args.init_from}: {what} of iteration {ck['meta']['iteration']} ({ck['meta']['args'].get('preset')})", flush=True)
     del ck
 if args.resume:
     ck = load_tree(os.path.join(args.resume, "last"))
@@ -410,6 +451,9 @@ wm_update_all_c = mx.compile(_wm_update_all, inputs=STATE, outputs=STATE)
 
 # --focus_replay: per-frame sampling weights from the probe sweeps' failures (None until a sweep found one)
 REPLAY = {"pi": None, "wm": None, "scale": 1.0}  # scale: the adaptive fraction of the configured shares
+TERM_M = [1.0]  # --term_margin: the current multiplier of the training termination thresholds
+TERM0 = (mdp.cfg.term_height, mdp.cfg.term_tilt)  # the evaluation's thresholds (evaluate.py builds its own MDP)
+TERM_P = [1.0]  # --term_prob: the termination probability per step past the thresholds, in training and in imagination
 DEFICIT = {"n": 0, "w": None}  # --deficit_replay: per-frame start weights from the simulator's segment returns
 
 
@@ -493,6 +537,8 @@ def _pi_loss_fast(S, o_hist, a_prev, f, xi, xi_n):
     fr = f_all[B:]
     r = mdp.reward(S_all, fr, flt(As), flt(Aps), w_contact=args.contact_reward).reshape(HZ, -1)
     d = mdp.soft_termination(S_all, fr).reshape(HZ, -1)
+    if TERM_P[0] < 1.0:  # a Python constant of the trace (--term_prob)
+        d = d * TERM_P[0]
     v_boot = critic(_critic_input(S, Fs[HZ], xi_n, G[HZ]))
     J_, c_t, c = actor_objective(r, d, v_boot, args.gamma)
     aux = (mx.stop_gradient(r), mx.stop_gradient(d), mx.stop_gradient(c_t), mx.stop_gradient(c),
@@ -520,6 +566,8 @@ def _pi_loss(S, o_hist, a_prev, f, xi, xi_n):
     f_all = flt(Fs)
     r = mdp.reward(S_all, f_all, flt(As), flt(Aps), w_contact=args.contact_reward).reshape(HZ, -1)
     d = mdp.soft_termination(S_all, f_all).reshape(HZ, -1)
+    if TERM_P[0] < 1.0:  # a Python constant of the trace (--term_prob)
+        d = d * TERM_P[0]
     v_boot = critic(_critic_input(S, f, xi_n, g))
     J_, c_t, c = actor_objective(r, d, v_boot, args.gamma)
     aux = (mx.stop_gradient(r), mx.stop_gradient(d), mx.stop_gradient(c_t), mx.stop_gradient(c),
@@ -908,7 +956,7 @@ if EPROBE:
             o = mdp.obs(unflatten_state(mx.array(s)), mx.array(penv.a_prev), mx.array(penv.xi), mx.array(penv.f.astype(np.int32)))
             mx.eval(o)
         EP.update(it=it, lead=lead, t0=time.time(), left=lead + args.eprobe_tile, stop=stop, fcap=fcap,
-                  fail_f=np.full(P_EP, -1), hist=mx.broadcast_to(o[:, None], (P_EP, Hh, mdp.obs_dim)))  # fmt: skip
+                  fail_f=np.full(P_EP, -1), fails=[], hist=mx.broadcast_to(o[:, None], (P_EP, Hh, mdp.obs_dim)))  # fmt: skip
         mx.eval(EP["hist"])  # materialized: --eprobe_thread hands it to the worker thread
 
     def eprobe_steps(k):
@@ -928,7 +976,19 @@ if EPROBE:
             f_now = penv.f.copy()
             with prof("ep.step"):
                 out = penv.step(a)
-            EP["fail_f"] = np.where(alive & (out["term"] | ~np.isfinite(a).all(-1)), f_now, EP["fail_f"])
+            fail = alive & (out["term"] | ~np.isfinite(a).all(-1))
+            EP["fail_f"] = np.where(fail & (EP["fail_f"] < 0), f_now, EP["fail_f"]) if args.eprobe_resume > 0 else np.where(fail, f_now, EP["fail_f"])
+            if args.eprobe_resume > 0 and fail.any():
+                EP["fails"].append(f_now[fail])
+                again = fail & (f_now + args.eprobe_resume < EP["stop"])
+                if again.any():  # back onto the reference past the failure, with a fresh observation history
+                    ids = np.nonzero(again)[0]
+                    penv.reset(ids, f_now[ids] + args.eprobe_resume)
+                    penv.done_eval[ids] = False
+                    with probe_ctx():
+                        _, h2 = ep_act_c(mx.array(penv.state_flat()), mx.array(penv.a_prev), mx.array(penv.xi), mx.array(penv.f.astype(np.int32)), EP["hist"])
+                        EP["hist"] = mx.where(mx.array(again)[:, None, None], h2[:, -1:], EP["hist"])
+                        mx.eval(EP["hist"])
             penv.done_eval |= penv.f >= EP["stop"]
             penv.f = np.minimum(penv.f, EP["fcap"])
             EP["left"] -= 1
@@ -956,7 +1016,8 @@ if EPROBE:
         global EP_FAIL
         m, fail_f = motion, EP["fail_f"]
         EP_FAIL = EP_FAIL * args.eprobe_decay
-        fb = m.frame_bin_np[fail_f[fail_f >= 0]]
+        all_f = np.concatenate(EP["fails"]) if EP["fails"] else fail_f[fail_f >= 0]  # --eprobe_resume: every failure
+        fb = m.frame_bin_np[all_f]
         np.add.at(EP_FAIL, fb, 1.0)
         if EP_FAIL.sum() > 0:
             w, q = EP_FAIL.copy(), EP_FAIL.copy()
@@ -966,11 +1027,13 @@ if EPROBE:
             env.set_focus(q / q.sum(), args.eprobe_share)
             replay_weights()
         nf = int((fail_f >= 0).sum())
-        fl = sorted({(m.names[int(m.clip_id_np[f])].replace("_subject", "_s"), int(f - m.clip_start_np[m.clip_id_np[f]])) for f in fail_f[fail_f >= 0]})
+        fl = sorted({(m.names[int(m.clip_id_np[f])].replace("_subject", "_s"), int(f - m.clip_start_np[m.clip_id_np[f]])) for f in all_f})
         rp = ""
         if REPLAY["wm"] is not None:  # the buffer's share of frames inside the replay windows (what uniform sampling would give)
             rp = f" | replay share {100 * args.focus_replay * REPLAY['scale']:.1f}%"
-        print(f"--eprobe it {EP['it']}: lead {EP['lead']} | {nf}/{P_EP} failures {fl[:8]} | {time.time() - EP['t0']:.1f} s{rp}", flush=True)
+        if args.eprobe_resume > 0:
+            rp += f" | {len(all_f)} failures with restarts"
+        print(f"--eprobe it {EP['it']}: lead {EP['lead']} | {nf}/{P_EP} failures {fl[:8 if args.eprobe_resume <= 0 else 16]} | {time.time() - EP['t0']:.1f} s{rp}", flush=True)
         EP.clear()
 
     if RESUME_CTRL is not None and RESUME_CTRL.get("ep_fail") is not None:
@@ -1052,13 +1115,30 @@ for it in range(start_it, args.iterations):
     if args.pi_mom > 0 and it == max(args.pi_mom_from, start_it):  # a Python constant of the trace: retrace once
         opt_pi.mom = args.pi_mom
         _PU.clear()
+    _tp = args.term_prob if (args.term_prob_until <= 0 or it < args.term_prob_until) else 1.0
+    if _tp != TERM_P[0]:  # a Python constant of the trace: retrace once
+        TERM_P[0], env.term_prob = _tp, _tp
+        _PU.clear()
+        print(f"--term_prob: termination probability per step {_tp:g} from it {it}", flush=True)
+    _tm = args.term_margin if it >= args.term_margin_from else 1.0
+    if _tm != TERM_M[0]:  # --term_margin: tighter training thresholds (Python constants of the traces: retrace)
+        TERM_M[0] = _tm
+        mdp.cfg = dataclasses.replace(mdp.cfg, term_height=TERM0[0] * _tm, term_tilt=TERM0[1] * _tm)  # own copy: RewardCfg() is a shared default
+        env._reward_fn, env._reward_fn_cpu = mx.compile(env._reward_term), mx.compile(env._reward_term)
+        _PU.clear()
+        print(f"--term_margin: training termination at height {mdp.cfg.term_height:.4f} m, tilt {mdp.cfg.term_tilt:.4f} from it {it}", flush=True)
     if WARM:  # compute schedule: cheap updates during the ramp (the compiled updates retrace once for the new shapes)
         args.pi_batch, HZ, args.wm_batches, args.pi_steps = sched_at(it)
     lr = lr_at(it)
     pi_mult = args.pi_lr_mult
     if DECAY_AT[0] is not None:
-        pi_mult = args.pi_lr_mult + (1.0 - args.pi_lr_mult) * min(1.0, (it - DECAY_AT[0]) / max(args.lr_decay_len, 1))
-    step_acc += 1.0 / args.utd
+        pi_mult = args.pi_lr_mult + (args.pi_lr_final - args.pi_lr_mult) * min(1.0, (it - DECAY_AT[0]) / max(args.lr_decay_len, 1))
+    late = 1.0  # --late_anneal: a second, late ramp of the step sizes towards --late_anneal_mult (stability once clean)
+    if args.late_anneal_from > 0 and it >= args.late_anneal_from:
+        late = 1.0 + (args.late_anneal_mult - 1.0) * min(1.0, (it - args.late_anneal_from) / max(args.late_anneal_len, 1))
+        if args.late_anneal_pi:
+            pi_mult *= late
+    step_acc += 1.0 / (args.utd_late if args.utd_late > 0 and it >= args.utd_late_from else args.utd)
     n = int(step_acc)
     step_acc -= n
     t0 = time.time()
@@ -1066,13 +1146,13 @@ for it in range(start_it, args.iterations):
         POLICY_START = args.wm_only_iters
         print(f"policy updates start at iteration {POLICY_START}", flush=True)
     do_pi = POLICY_START is not None and it >= POLICY_START
-    lr_mx = mx.array(lr, dtype=mx.float32)
+    lr_mx = mx.array(lr * args.wm_lr_mult * (late if args.late_anneal_wm else 1.0), dtype=mx.float32)  # the world-model updates' step size
     if not args.overlap:
         # upstream order: probe steps, collect, world-model updates, policy + critic update
         if EPROBE:
             if EP and args.eprobe_async:
                 eprobe_steps(args.eprobe_async)
-            if it >= args.eprobe_start and it % args.eprobe_every == 0:
+            if it >= args.eprobe_start and it % args.eprobe_every == 0 and not (0 < args.eprobe_until <= it):
                 assert not EP, "--eprobe_async too small: the previous sweep has not finished"
                 eprobe_begin(it, EMA["p"])
                 if not args.eprobe_async:
@@ -1085,7 +1165,7 @@ for it in range(start_it, args.iterations):
         res = None
         if do_pi:
             for _ in range(args.pi_steps):
-                res = policy_update(lr * pi_mult, lr)
+                res = policy_update(lr * pi_mult, lr * args.v_lr_mult)
                 prof_eval("pi.encode", "pi.gpu", res, STATE)  # STATE: the EMA would otherwise stay a lazy chain of copies
         t3 = time.time()
     else:
@@ -1102,7 +1182,7 @@ for it in range(start_it, args.iterations):
             wm_in = wm_inputs()
             starts = [pi_starts() for _ in range(args.pi_steps)] if do_pi else None
         PRE = None
-        pi_in = [pi_inputs(lr * pi_mult, lr, st) for st in starts] if do_pi else None
+        pi_in = [pi_inputs(lr * pi_mult, lr * args.v_lr_mult, st) for st in starts] if do_pi else None
 
         def learner_job(wm_in=wm_in, pi_in=pi_in, lr_mx=lr_mx):
             with prof("lrn.build_wm"):
@@ -1123,6 +1203,7 @@ for it in range(start_it, args.iterations):
         # (MLX's compile cache is not known to be safe to fill from two threads); the probe functions are traced at setup
         concurrent = it >= start_it + 2 and it != POLICY_START and not (WARM and it in (args.pi_batch_switch, args.pi_batch_switch + 1))
         concurrent = concurrent and not (args.pi_mom > 0 and it in (args.pi_mom_from, args.pi_mom_from + 1))  # its retrace
+        concurrent = concurrent and not (args.term_margin != 1.0 and it in (args.term_margin_from, args.term_margin_from + 1))
         concurrent = concurrent and not os.environ.get("SMX_OVERLAP_SERIAL")  # debug: overlap semantics, no concurrency
         mx.eval(STATE, wm_in, pi_in if pi_in is not None else (), lr_mx)  # MLX streams are per thread: hand over materialized arrays
         LEARNER.submit(learner_job)
@@ -1144,7 +1225,7 @@ for it in range(start_it, args.iterations):
                     probe_pending = True  # runs concurrently with the collection and the learner
             elif EP and args.eprobe_async:
                 eprobe_steps(args.eprobe_async)
-            if it >= args.eprobe_start and it % args.eprobe_every == 0:
+            if it >= args.eprobe_start and it % args.eprobe_every == 0 and not (0 < args.eprobe_until <= it):
                 assert not EP, "--eprobe_async too small: the previous sweep has not finished"
                 eprobe_begin(it, ema_snap)
                 if not args.eprobe_async:
@@ -1191,7 +1272,7 @@ for it in range(start_it, args.iterations):
         if args.lr_decay_ret > 0 and DECAY_AT[0] is None and (row[12] >= args.lr_decay_ret or deadline):
             DECAY_AT[0] = it + 1
             why = f"training return {row[12]:.3f} >= {args.lr_decay_ret}" if row[12] >= args.lr_decay_ret else f"deadline --lr_decay_by {args.lr_decay_by}"
-            print(f"--lr_decay_ret: {why} at it {it + 1}: policy LR x{args.pi_lr_mult} -> x1 over {args.lr_decay_len} its", flush=True)
+            print(f"--lr_decay_ret: {why} at it {it + 1}: policy LR x{args.pi_lr_mult} -> x{args.pi_lr_final:g} over {args.lr_decay_len} its", flush=True)
         print(f"it {it + 1} | {wall_h:.3f} h | wm {row[3]:.4f} e8 {row[4]:.4f} | pi {row[5]:.3f} v {row[6]:.4f} imag_r {row[7]:.3f} "
               f"surv {row[9]:.3f} | sim_r {row[10]:.3f} ep_len {row[11]:.1f} ep_ret {row[12]:.3f} term {term_frac:.2f} | "
               f"{ips:.2f} it/s (collect {row[-3]:.0f} wm {row[-2]:.0f} pi {row[-1]:.0f} ms) | gpu peak {mx.get_peak_memory() / 2**30:.1f} GB, active {mx.get_active_memory() / 2**30:.1f} GB",
