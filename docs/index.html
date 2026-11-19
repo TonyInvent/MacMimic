@@ -412,7 +412,7 @@ cd macmimic
 uv sync
 bash tools/download_data.sh   <span class="c"># motion clips and robot model</span>
 uv run python tools/urdf_to_mjcf.py
-bash scripts/train.sh macmimic2 logs/macmimic2_s0 --seed 0</code></pre>
+bash scripts/train.sh macmimic logs/macmimic_s0 --seed 0</code></pre>
         <div>
           <p>You need a Mac with Apple silicon, <a href="https://docs.astral.sh/uv/">uv</a> and curl. The full 2,000
             iterations take about 30 minutes on an M4 Pro; the target is usually reached by iteration 1,400&ndash;1,500. Settings that

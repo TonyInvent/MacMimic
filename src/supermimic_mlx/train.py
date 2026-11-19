@@ -37,21 +37,22 @@ PRESETS = {
 
 
 PRESETS["xmimic"] = dict(PRESETS["blinkmimic"], overlap=True)
-# MacMimic: XMimic re-budgeted for an Apple-silicon GPU, where the learner is compute-bound (the policy update costs
-# linear in the batch) and a small GPU call from the actor thread queues behind the learner. Policy batch 1024 (-38%
-# per iteration; the return ends ~0.01 lower, recovered by the earlier step-size decay), probes from it 400 with a
-# focus share of 0.3, their termination in numpy and their sweep on a worker thread, a faster policy average (fewer
-# late failed clips than 0.995 in 3 of 4 runs). See logs/hill/results.txt for the trials behind each setting.
-PRESETS["macmimic"] = dict(PRESETS["xmimic"], pi_batch=1024, pi_ema=0.99, lr_decay_by=1100, iterations=2000,
-                           eprobe_start=400, eprobe_every=60, eprobe_tile=600, eprobe_share=0.3, eprobe_lead_min=100,
-                           eprobe_lead_max=200, eprobe_np_term=True, eprobe_thread=True)
-# MacMimic 2 (2026-11-18, docs/macmimic_hillclimb.md): the world model at 8x the step size learns enough from 3 updates per
-# iteration instead of 5 (-19% per iteration); bf16 LayerNorm; the step-size decay from it 800; from it 400, when the probe
-# sweeps make the CPU the bottleneck and the GPU has slack, a policy batch of 1280, whose return margin pays for 10% of the
-# policy's imagination starts drawn from the probe failures' windows (clears the hard clip dance1_subject1 earlier).
-# Strict target (return >= 0.82, 0 failed clips, 3 checkpoints) at it 1400 / 1400 / 1500, 21.3 / 21.0 / 22.5 min on seeds 0-2.
-PRESETS["macmimic2"] = dict(PRESETS["macmimic"], wm_lr_mult=8.0, wm_batches=3, ln_bf16=True, lr_decay_by=800, pi_batch=1280,
-                            pi_batch_warm=1024, pi_batch_switch=400, focus_replay=0.1)
+# MacMimic, first version (2026-11-17; 29 min to the strict target, 1.52x the BlinkMimic port): XMimic re-budgeted for an
+# Apple-silicon GPU, where the learner is compute-bound (the policy update costs linear in the batch) and a small GPU call
+# from the actor thread queues behind the learner. Policy batch 1024 (-38% per iteration; the return ends ~0.01 lower,
+# recovered by the earlier step-size decay), probes from it 400 with a focus share of 0.3, their termination in numpy and
+# their sweep on a worker thread, a faster policy average (fewer late failed clips than 0.995 in 3 of 4 runs).
+PRESETS["macmimic_v1"] = dict(PRESETS["xmimic"], pi_batch=1024, pi_ema=0.99, lr_decay_by=1100, iterations=2000,
+                              eprobe_start=400, eprobe_every=60, eprobe_tile=600, eprobe_share=0.3, eprobe_lead_min=100,
+                              eprobe_lead_max=200, eprobe_np_term=True, eprobe_thread=True)
+# MacMimic (2026-11-18, docs/macmimic_hillclimb.md): the first version with the world model at 8x the step size, which
+# learns enough from 3 updates per iteration instead of 5 (-19% per iteration); bf16 LayerNorm; the step-size decay from
+# it 800; from it 400, when the probe sweeps make the CPU the bottleneck and the GPU has slack, a policy batch of 1280,
+# whose return margin pays for 10% of the policy's imagination starts drawn from the probe failures' windows (clears the
+# hard clip dance1_subject1 earlier). Strict target (return >= 0.82, 0 failed clips, 3 checkpoints) at it 1400 / 1400 /
+# 1500, 21.3 / 21.0 / 22.5 min on seeds 0-2: 2.04x the BlinkMimic port.
+PRESETS["macmimic"] = dict(PRESETS["macmimic_v1"], wm_lr_mult=8.0, wm_batches=3, ln_bf16=True, lr_decay_by=800, pi_batch=1280,
+                           pi_batch_warm=1024, pi_batch_switch=400, focus_replay=0.1)
 # fine-tuning a pretrained (MuJoCo) run in SuperDex Physics: use with --init_from <run_dir>. Few worlds (SuperDex is
 # ~15x slower per world), the world model adapts first (--wm_only_iters), the policy at the base learning rate; the
 # source run's network flags are taken over by --init_from
