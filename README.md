@@ -1,8 +1,12 @@
 # MacMimic for OpenSprite v5
 
+[![OpenSprite v5 walking, turning and stopping in a 35-second MuJoCo simulation](docs/opensprite-r1/xbox_sequence.webp)](docs/opensprite-r1/xbox_sequence.mp4)
+
+*Update 1,800 follows Xbox commands in MuJoCo. [Play the 35-second MP4](docs/opensprite-r1/xbox_sequence.mp4).*
+
 This fork trains OpenSprite on Apple silicon with MacMimic and the reviewed Sprite SM-Walk R1 walking and standing references. On an M4 Pro with 48 GB, seed 49 completed 6,000 updates in 2 h 27 min. **Update 1,800** is the selected Xbox velocity policy. It walked at 0.278 m/s under a 0.40 m/s command in MuJoCo and stopped on trigger release. Right turns remained weak. Hardware testing of these weights is pending.
 
-[Run the policy or reproduce training](docs/opensprite.md) · [Download ONNX and MLX checkpoint](https://github.com/TonyInvent/MacMimic/releases/tag/opensprite-r1-mac-s49-it1800) · [35-second simulation video](docs/opensprite-r1/xbox_sequence.mp4) · [Evaluation results](docs/opensprite-r1/evaluation)
+[Run the policy or reproduce training](docs/opensprite.md) · [Download ONNX and MLX checkpoint](https://github.com/TonyInvent/MacMimic/releases/tag/opensprite-r1-mac-s49-it1800) · [Evaluation results](docs/opensprite-r1/evaluation)
 
 ## Original MacMimic G1 benchmark
 
