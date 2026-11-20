@@ -13,7 +13,7 @@ import numpy as np
 
 from .kinematics import Kinematics
 from .motion import MotionLib
-from .robots import g1
+from .robots import active as robot, name as embodiment
 from .rotations import mat_to_6d, mat_to_quat, mm3, mv3, quat_to_mat, rot_angle_sq, yaw_mat, T, sum_last
 from .scene import CONTROL_DT
 
@@ -23,7 +23,7 @@ def state_dim(J: int) -> int:
 
 
 def obs_dim(J: int) -> int:
-    return J + J + 3 + 3 + J + 6
+    return J + J + 3 + 3 + J + (0 if embodiment == "opensprite" else 6)
 
 
 def inv_dim(J: int) -> int:
@@ -70,16 +70,26 @@ def invariant_features(S) -> mx.array:
 class MDP:
     def __init__(self, kin: Kinematics, motion: MotionLib, xi_dim: int, cfg: RewardCfg = RewardCfg()):
         self.kin, self.motion, self.cfg = kin, motion, cfg
-        self.default_q = mx.array(g1.default_joint_pos())
+        self.default_q = mx.array(robot.default_joint_pos())
         J = self.default_q.shape[0]
         mid, half = (kin.q_lo + kin.q_hi) / 2, (kin.q_hi - kin.q_lo) / 2
         self.soft_lo, self.soft_hi = mid - half * cfg.soft_limit_factor, mid + half * cfg.soft_limit_factor
         self.num_j, self.obs_dim, self.xi_dim = J, obs_dim(J), xi_dim
         self.critic_extra = J + len(kin.tracked_idx) * 3 + 3 + 6 + xi_dim
-        n = g1.NOISE
+        n = robot.NOISE
         self.obs_noise = mx.array(np.concatenate((np.full(J, n["joint_pos"]), np.full(J, n["joint_vel"]), np.full(3, n["ang_vel"]),
                                                   np.full(3, n["gravity"]), np.zeros(J), np.full(6, n["ref_ori"]))).astype(np.float32))  # fmt: skip
-        self.feet: list[int] = [list(g1.TRACKED_BODIES).index(b) for b in g1.FEET]
+        if embodiment == "opensprite":
+            self.obs_noise = self.obs_noise[:-6]
+        self.feet: list[int] = [list(robot.TRACKED_BODIES).index(b) for b in robot.FEET]
+        self.r1_soles = getattr(motion, "r1_reference", False)
+        if self.r1_soles:
+            geoms = [robot.MODEL.geom(s + "_foot_collision") for s in ("left", "right")]
+            self.sole_centers = mx.array(np.stack([g.pos for g in geoms]), dtype=mx.float32)
+            self.sole_half = mx.array(np.stack([g.size for g in geoms]), dtype=mx.float32)
+            mx.eval(self.sole_centers, self.sole_half)
+            if not np.allclose([g.quat for g in geoms], [[1, 0, 0, 0]] * 2):
+                raise ValueError("R1 sole boxes must be aligned with their foot body frames")
         mx.eval(self.default_q, self.soft_lo, self.soft_hi, self.obs_noise)  # materialized: usable from any thread's stream
 
     # ---------------- observation ----------------
@@ -89,6 +99,8 @@ class MDP:
         Rt = T(R)
         dq0 = xi[..., 1 : 1 + q.shape[-1]]
         g_b = -R[..., 2, :]  # R^T (0,0,-1)
+        if embodiment == "opensprite":
+            return mx.concatenate((q - self.default_q - dq0, qd, mv3(Rt, w), g_b, a_prev), -1)
         rel = mat_to_6d(mm3(Rt, self.motion.root_R[f]))
         return mx.concatenate((q - self.default_q - dq0, qd, mv3(Rt, w), g_b, a_prev, rel), -1)
 
@@ -104,6 +116,14 @@ class MDP:
         anchor = mx.concatenate((p[..., :2], rp[..., 2:3]), -1)
         ref_bp = mx.expand_dims(anchor, -2) + mv3(mx.expand_dims(dR, -3), m.body_p[f] - mx.expand_dims(rp, -2))
         return ref_bp, dR, rp, rR
+
+    def sole_geometry(self, pos, rotations):
+        feet = mx.array(self.feet)
+        rot = rotations[..., feet, :, :]
+        offset = mv3(rot, self.sole_centers)
+        centers = pos[..., feet, :] + offset
+        height = centers[..., 2] - (mx.abs(rot[..., 2, :]) * self.sole_half).sum(-1)
+        return centers, rot, offset, height
 
     def reward(self, S, f, a, a_prev, terms: bool = False, w_contact: float = 0.0, ref_contact=None):
         """Per-step reward (already multiplied by dt) comparing S with reference frame f. ``w_contact`` > 0 adds the
@@ -130,6 +150,10 @@ class MDP:
         r_rate = ((a - a_prev) ** 2).sum(-1)
         r_lim = (mx.maximum(q - self.soft_hi, 0) + mx.maximum(self.soft_lo - q, 0)).sum(-1)
         r = (r_track + c.w_action_rate * r_rate + c.w_joint_limit * r_lim) * CONTROL_DT
+        if self.r1_soles:
+            actual_z = self.sole_geometry(bp, bR)[3]
+            target_z = self.sole_geometry(ref_bp, ref_bR)[3]
+            r += CONTROL_DT * 0.25 * mx.expm1(-((actual_z - target_z) / 0.015) ** 2).mean(-1)
         if w_contact > 0:
             feet = mx.array(self.feet)
             fz, rz = bp[..., feet, 2], m.body_p[f][..., feet, 2]

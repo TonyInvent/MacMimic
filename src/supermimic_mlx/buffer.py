@@ -24,9 +24,10 @@ def fields(num_j: int, xi_dim: int) -> dict:
 
 
 class ReplayBuffer:
-    def __init__(self, T: int, N: int, num_j: int, xi_dim: int, seed: int = 0):
+    def __init__(self, T: int, N: int, num_j: int, xi_dim: int, seed: int = 0, extra_fields=None):
         self.T, self.N = T, N
         self.fields = fields(num_j, xi_dim)
+        self.fields.update(extra_fields or {})
         self.data = {k: np.zeros((T, N) + ((s,) if isinstance(s, int) else s), dtype=dt) for k, (s, dt) in self.fields.items()}
         self.ptr, self.size = 0, 0
         self.rng = np.random.default_rng(seed + 12345)
@@ -85,4 +86,4 @@ class ReplayBuffer:
         hrows = self._row(age[:, None] - back)
         henv = np.broadcast_to(env[:, None], hrows.shape)
         keys = ("s", "a_prev", "xi", "f")
-        return {k: self.data[k][row, env] for k in keys}, {k: self.data[k][hrows, henv] for k in keys}
+        return {k: self.data[k][row, env] for k in (*keys, *(("command",) if "command" in self.fields else ()))}, {k: self.data[k][hrows, henv] for k in keys}

@@ -6,7 +6,7 @@ build-backend = "uv_build"
 name = "supermimic-mlx"
 version = "0.1.0"
 description = "SuperMimic and BlinkMimic (G1 whole-body motion tracking with a differentiable world model) on Apple silicon: MLX + CPU MuJoCo."
-license = "MIT"
+license = "AGPL-3.0-only"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
@@ -20,6 +20,11 @@ dependencies = [
 superdex = [
     "superdex-physics>=1.0.1",
     "superdex-robotics>=1.0.1",
+]
+opensprite = [
+    "onnx==1.23.2",
+    "onnxruntime==1.32.0",
+    "pygame-ce==2.5.8",
 ]
 
 [dependency-groups]

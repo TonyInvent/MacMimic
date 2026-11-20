@@ -6,19 +6,14 @@
 """
 
 import argparse
+import json
+import os
+from pathlib import Path
 import subprocess
 
 import mlx.core as mx
 import mujoco
 import numpy as np
-
-from supermimic_mlx.checkpoint import load_tree
-from supermimic_mlx.evaluate import Evaluator
-from supermimic_mlx.mdp import unflatten_state
-from supermimic_mlx.networks import policy_from_args
-from supermimic_mlx.optim import unflat
-from supermimic_mlx.robots import g1
-from supermimic_mlx.scene import apply_options, scene_spec
 
 p = argparse.ArgumentParser()
 p.add_argument("--ckpt", required=True)
@@ -38,6 +33,23 @@ p.add_argument("--out", default="render.mp4")
 p.add_argument("--width", type=int, default=640)
 p.add_argument("--height", type=int, default=480)
 a = p.parse_args()
+meta = json.loads(Path(a.ckpt.removesuffix(".safetensors") + ".json").read_text())["args"]
+if meta.get("embodiment") == "opensprite":
+    os.environ["MACMIMIC_ROBOT"] = "opensprite"
+    os.environ["OPENSPRITE_BANK"] = meta["opensprite_bank"]
+    if meta.get("opensprite_r1_bank"):
+        from supermimic_mlx.r1_reference import check_r1_file
+
+        check_r1_file(meta["opensprite_bank"])
+
+from supermimic_mlx.checkpoint import load_tree
+from supermimic_mlx.evaluate import Evaluator
+from supermimic_mlx.mdp import unflatten_state
+from supermimic_mlx.networks import policy_from_args
+from supermimic_mlx.optim import unflat
+from supermimic_mlx.robots import active as robot
+from supermimic_mlx.scene import build_model
+
 
 ev = Evaluator(nthread=1, clips=[a.clip])
 m, env, mdp = ev.motion, ev.env, ev.mdp
@@ -45,7 +57,7 @@ ck = load_tree(a.ckpt)
 ar = ck["meta"]["args"]
 K, Hh = ar["goal_frames"], ar["hist"]
 m.goal_stride = ar.get("goal_stride", 1)
-pi = policy_from_args(ar, mdp.obs_dim, m.goal_dim(K), len(g1.JOINT_NAMES))
+pi = policy_from_args(ar, mdp.obs_dim, m.goal_dim(K), len(robot.JOINT_NAMES))
 pi.update(unflat(ck["pi"]))
 c = m.names.index(a.clip)
 f_rec = int(m.clip_start_np[c] + round(a.start_s / 0.02))  # first recorded frame
@@ -73,30 +85,8 @@ for t in range(int(a.seconds / 0.02) + (f_rec - f0)):
         break
 print(f"{len(qs)} steps, failed: {fails[-1] if fails else None}")
 
-def render_model(look: str) -> mujoco.MjModel:
-    """The visual scene; ``studio`` adds a gradient sky, a grid floor and soft shadows (rendering only)."""
-    spec = scene_spec(visual=True)
-    if look == "studio":
-        spec.add_texture(name="sky", type=mujoco.mjtTexture.mjTEXTURE_SKYBOX, builtin=mujoco.mjtBuiltin.mjBUILTIN_GRADIENT,
-                         rgb1=[0.16, 0.18, 0.22], rgb2=[0.02, 0.02, 0.03], width=512, height=3072)  # fmt: skip
-        spec.add_texture(name="grid", type=mujoco.mjtTexture.mjTEXTURE_2D, builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
-                         rgb1=[0.13, 0.14, 0.16], rgb2=[0.11, 0.12, 0.14], width=512, height=512,
-                         mark=mujoco.mjtMark.mjMARK_EDGE, markrgb=[0.24, 0.26, 0.3])  # fmt: skip
-        mat = spec.add_material(name="grid", texrepeat=[1, 1], texuniform=True, reflectance=0.08)
-        mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "grid"
-        spec.geom("terrain").material = "grid"
-        spec.visual.quality.shadowsize = 4096
-        spec.visual.headlight.ambient = [0.35, 0.35, 0.38]
-        spec.visual.headlight.diffuse = [0.55, 0.55, 0.58]
-        spec.visual.headlight.specular = [0.1, 0.1, 0.1]
-        spec.visual.rgba.haze = [0.05, 0.055, 0.07, 1.0]  # the horizon blends into the sky
-    m_ = spec.compile()
-    apply_options(m_)
-    m_.vis.global_.offwidth, m_.vis.global_.offheight = max(a.width, 640), max(a.height, 480)  # offscreen buffer
-    return m_
-
-
-model = render_model(a.look)
+model = build_model(visual=True, studio=a.look == "studio")
+model.vis.global_.offwidth, model.vis.global_.offheight = max(a.width, 640), max(a.height, 480)
 data, ref = mujoco.MjData(model), mujoco.MjData(model)
 r = mujoco.Renderer(model, a.height, a.width)
 cam = mujoco.MjvCamera()

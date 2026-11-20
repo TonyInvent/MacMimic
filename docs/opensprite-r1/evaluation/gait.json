@@ -1,0 +1,54 @@
+{
+  "swing_onset_mm": 8,
+  "swing_end_mm": 2,
+  "reference": {
+    "pm01_clearance_walk": {
+      "duration_s": 11.44,
+      "swing_onsets_left_right": [
+        14,
+        14
+      ],
+      "same_foot_consecutive_onsets": 0,
+      "sole_height_p95_mm": [
+        23.66917958157776,
+        23.87101987150125
+      ]
+    },
+    "Neutral_ID_001135_001495_stand": {
+      "duration_s": 6.0,
+      "swing_onsets_left_right": [
+        0,
+        0
+      ],
+      "same_foot_consecutive_onsets": 0,
+      "sole_height_p95_mm": [
+        0.5014516722261306,
+        0.46721886005279484
+      ]
+    }
+  },
+  "policy_stand": {
+    "duration_s": 10.0,
+    "swing_onsets_left_right": [
+      0,
+      0
+    ],
+    "same_foot_consecutive_onsets": 0,
+    "sole_height_p95_mm": [
+      -0.5565400696909815,
+      -0.5677875876737638
+    ]
+  },
+  "policy_walk_040": {
+    "duration_s": 10.0,
+    "swing_onsets_left_right": [
+      17,
+      17
+    ],
+    "same_foot_consecutive_onsets": 0,
+    "sole_height_p95_mm": [
+      15.20906479698285,
+      10.959950897060791
+    ]
+  }
+}

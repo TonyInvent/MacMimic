@@ -94,3 +94,9 @@ their own distributions under their own licenses (Apache-2.0, BSD-3-Clause and o
 The LAFAN1 motions (Ubisoft La Forge, CC BY-NC-ND 4.0) and the Unitree G1 description (BSD-3-Clause) are downloaded
 by `tools/download_data.sh` and are not redistributed here either; files derived from LAFAN1 (videos, GIFs,
 checkpoints) are not covered by this repository's MIT License.
+
+## OpenSprite
+
+The OpenSprite joint velocity reward, command sampling, encoder training, replay contract and Xbox control conventions are adapted from BeijingDynamics/OpenSprite-SuperMimic at commit `bc570e272f5ae07067d5c75c1c1b3051bf615b6a`. The upstream repository provides its [AGPL-3.0 license](https://github.com/BeijingDynamics/OpenSprite-SuperMimic/blob/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/LICENSE) and [asset and data notices](https://github.com/BeijingDynamics/OpenSprite-SuperMimic/blob/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/DATA_AND_LICENSES.md). These are retained in the local OpenSprite checkout. The five reconstructed references use the Ubisoft La Forge LAFAN1 Geno-resolved motions identified in that checkout.
+
+The R1 policy in this fork uses PM01/G71 walking from [BeijingDynamics/open_sprite_rl](https://github.com/BeijingDynamics/open_sprite_rl) with the upstream clearance correction, and a retargeted standing excerpt from **The 100STYLE Dataset – Ian Mason** (CC BY 4.0), using Daniel Holden's Geno conversion. The local weights were trained from random initialization. See [the dataset](https://www.ianxmason.com/100style/), [Mason, Starke and Komura (2022)](https://doi.org/10.1145/3522618), and the [upstream terms and provenance](https://github.com/BeijingDynamics/OpenSprite-SuperMimic/blob/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/DATA_AND_LICENSES.md). The code license applies to the combined software. External motion data and character assets retain their own terms.

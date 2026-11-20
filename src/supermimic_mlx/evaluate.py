@@ -15,10 +15,48 @@ import argparse
 import glob
 import json
 import os
+from pathlib import Path
 import time
 
 import mlx.core as mx
 import numpy as np
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--run_dir", type=str, default=None)
+    p.add_argument("--ckpt", type=str, default=None)
+    p.add_argument("--watch", action="store_true", help="keep evaluating new checkpoints until the run writes last.json")
+    p.add_argument("--every", type=int, default=1, help="evaluate every n-th checkpoint")
+    p.add_argument("--record", type=str, default=None)
+    p.add_argument("--threads", type=int, default=4)
+    p.add_argument("--sim_backend", type=str, default="mujoco", choices=["mujoco", "superdex"],
+                   help="simulator to evaluate in (superdex: cross-simulator evaluation; --threads worker processes)")
+    p.add_argument("--clips", type=str, default=None, help="comma-separated clip names (default: all clips)")
+    p.add_argument("--out", type=str, default="eval.csv", help="result file in the run directory")
+    p.add_argument("--batch", type=int, default=1, help="evaluate this many checkpoints at once (all clips each)")
+    p.add_argument("--min_it", type=int, default=0, help="only checkpoints from this iteration on")
+    return p.parse_args()
+
+if __name__ == "__main__":
+    cli = parse_args()
+    if cli.ckpt:
+        meta = Path(cli.ckpt.removesuffix(".safetensors") + ".json")
+        run_args = json.loads(meta.read_text())["args"]
+    elif cli.run_dir:
+        meta = Path(cli.run_dir) / "args.json"
+        while cli.watch and not meta.exists():
+            time.sleep(1)
+        run_args = json.loads(meta.read_text()) if meta.exists() else {}
+    else:
+        raise SystemExit("Specify --ckpt or --run_dir.")
+    os.environ["MACMIMIC_ROBOT"] = run_args.get("embodiment", "g1")
+    if os.environ["MACMIMIC_ROBOT"] == "opensprite":
+        bank = os.environ.setdefault("OPENSPRITE_BANK", run_args["opensprite_bank"])
+        if run_args.get("opensprite_r1_bank"):
+            from .r1_reference import check_r1_file
+
+            check_r1_file(bank)
+
 
 from . import networks
 from .checkpoint import load_tree
@@ -27,14 +65,18 @@ from .mdp import MAX_STEP_REWARD, MDP, unflatten_state
 from .motion import MotionLib
 from .networks import policy_from_args
 from .optim import unflat
-from .robots import g1
+from .robots import active as robot
 from .sim import TrackingSim, XiLayout
 
 
 class Evaluator:
     def __init__(self, nthread: int | None = None, clips: list[str] | None = None, backend: str = "mujoco"):
         self.kin = Kinematics()
-        self.motion = MotionLib.from_dir(g1.MOTION_DIR, self.kin, g1.load_motion)
+        self.motion = (
+            robot.motion_library(os.environ["OPENSPRITE_BANK"], self.kin)
+            if hasattr(robot, "motion_library")
+            else MotionLib.from_dir(robot.MOTION_DIR, self.kin, robot.load_motion)
+        )
         self.layout = XiLayout()
         self.mdp = MDP(self.kin, self.motion, self.layout.dim)
         m = self.motion
@@ -48,7 +90,7 @@ class Evaluator:
         K, Hh = a_["goal_frames"], a_["hist"]
         networks.set_compute_dtype(mx.bfloat16 if a_.get("precision") == "bf16" else None)  # as trained (upstream: AMP)
         self.motion.goal_stride = a_.get("goal_stride", 1)
-        pi = policy_from_args(a_, self.mdp.obs_dim, m.goal_dim(K), len(g1.JOINT_NAMES))
+        pi = policy_from_args(a_, self.mdp.obs_dim, m.goal_dim(K), len(robot.JOINT_NAMES))
         pi.update(unflat(ck["pi"]))
 
         def act(s, a_prev, xi, f, hist):
@@ -73,7 +115,9 @@ class Evaluator:
             a = np.array(a)
             alive = ~env.done_eval.copy()
             if record:
-                traj["root_p"].append(s[:, :3]), traj["root_quat"].append(s[:, 3:7]), traj["q"].append(s[:, 13 : 13 + 29])
+                traj["root_p"].append(s[:, :3]), traj["root_quat"].append(s[:, 3:7]), traj["q"].append(
+                    s[:, 13 : 13 + len(robot.JOINT_NAMES)]
+                )
                 traj["f"].append(env.f.copy()), traj["alive"].append(alive)
             out = env.step(a)
             ret += np.where(alive, out["r"], 0.0)
@@ -104,7 +148,11 @@ class BatchEvaluator:
     def __init__(self, G: int, nthread: int | None = None, backend: str = "mujoco"):
         self.G = G
         self.kin = Kinematics()
-        self.motion = MotionLib.from_dir(g1.MOTION_DIR, self.kin, g1.load_motion)
+        self.motion = (
+            robot.motion_library(os.environ["OPENSPRITE_BANK"], self.kin)
+            if hasattr(robot, "motion_library")
+            else MotionLib.from_dir(robot.MOTION_DIR, self.kin, robot.load_motion)
+        )
         self.layout = XiLayout()
         self.mdp = MDP(self.kin, self.motion, self.layout.dim)
         self.C = len(self.motion.names)
@@ -119,7 +167,9 @@ class BatchEvaluator:
         networks.set_compute_dtype(mx.bfloat16 if a_.get("precision") == "bf16" else None)
         self.motion.goal_stride = a_.get("goal_stride", 1)
         m, C, K = self.motion, self.C, a_["goal_frames"]
-        self.pis = [policy_from_args(a_, self.mdp.obs_dim, m.goal_dim(K), len(g1.JOINT_NAMES)) for _ in range(self.G)]
+        self.pis = [
+            policy_from_args(a_, self.mdp.obs_dim, m.goal_dim(K), len(robot.JOINT_NAMES)) for _ in range(self.G)
+        ]
 
         def act(s, a_prev, xi, f, hist):
             o = self.mdp.obs(unflatten_state(s), a_prev, xi, f)
@@ -173,21 +223,8 @@ def ckpt_paths(run_dir: str) -> list[str]:
     return sorted(p.removesuffix(".safetensors") for p in glob.glob(os.path.join(run_dir, "ckpt_*.safetensors")))
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--run_dir", type=str, default=None)
-    p.add_argument("--ckpt", type=str, default=None)
-    p.add_argument("--watch", action="store_true", help="keep evaluating new checkpoints until the run writes last.json")
-    p.add_argument("--every", type=int, default=1, help="evaluate every n-th checkpoint")
-    p.add_argument("--record", type=str, default=None)
-    p.add_argument("--threads", type=int, default=4)
-    p.add_argument("--sim_backend", type=str, default="mujoco", choices=["mujoco", "superdex"],
-                   help="simulator to evaluate in (superdex: cross-simulator evaluation; --threads worker processes)")
-    p.add_argument("--clips", type=str, default=None, help="comma-separated clip names (default: all 40)")
-    p.add_argument("--out", type=str, default="eval.csv", help="result file in the run directory")
-    p.add_argument("--batch", type=int, default=1, help="evaluate this many checkpoints at once (all 40 clips each)")
-    p.add_argument("--min_it", type=int, default=0, help="only checkpoints from this iteration on")
-    a = p.parse_args()
+def main(a=None):
+    a = parse_args() if a is None else a
     if a.batch > 1:
         assert a.run_dir and not a.clips and not a.ckpt
         return eval_run_batched(a)
@@ -245,7 +282,7 @@ def eval_run_batched(a):
             rows.append((it, f"{it},{meta['wall_time'] / 3600:.4f},{meta['saved_at']},{time.strftime('%Y-%m-%d %H:%M:%S')},"
                              f"{res['norm_return']:.4f},{res['norm_return_framew']:.4f},{res['n_failed']},{'|'.join(res['failed'])}\n"))  # fmt: skip
             json.dump(res, open(c + "_" + a.out.removesuffix(".csv") + ".json", "w"), indent=1)
-            print(f"[eval] it {it} ({meta['wall_time'] / 60:.1f} min): norm return {res['norm_return']:.4f}, failed {res['n_failed']}/40", flush=True)
+            print(f"[eval] it {it} ({meta['wall_time'] / 60:.1f} min): norm return {res['norm_return']:.4f}, failed {res['n_failed']}/{ev.C}", flush=True)
         print(f"[eval] group of {len(group)} checkpoints in {time.time() - t0:.0f} s", flush=True)
     with open(out_csv, "a") as f:
         for _, line in sorted(rows):
@@ -253,4 +290,4 @@ def eval_run_batched(a):
 
 
 if __name__ == "__main__":
-    main()
+    main(cli)

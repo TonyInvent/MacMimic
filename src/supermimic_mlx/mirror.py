@@ -10,14 +10,14 @@ from __future__ import annotations
 import mlx.core as mx
 import numpy as np
 
-from .robots import g1
+from .robots import active as robot
 
 _FLIP_TYPES = ("roll", "yaw")
 
 
 class Mirror:
     def __init__(self, xi_slices: dict):
-        names = list(g1.JOINT_NAMES)
+        names = list(robot.JOINT_NAMES)
         perm, sign = [], []
         for n in names:
             partner = n.replace("left_", "@").replace("right_", "left_").replace("@", "right_")

@@ -63,6 +63,9 @@ PRESETS["finetune_superdex"] = dict(PRESETS["blinkmimic"], sim_backend="superdex
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
+    sources = p.add_mutually_exclusive_group()
+    sources.add_argument("--opensprite_r1_bank", help="Train from the published R1 walk/stand bank with fixed 80/20 reset probabilities.")
+    sources.add_argument("--opensprite_bank", help="50 Hz OpenSprite NPZ. Enables joint motion and velocity training.")
     a = p.add_argument
     a("--preset", type=str, default="supermimic", choices=sorted(PRESETS))
     a("--num_envs", type=int, default=4096)
@@ -249,9 +252,40 @@ def parse_args(argv=None):
 
 
 args = parse_args()
+if args.opensprite_r1_bank:
+    args.opensprite_bank = args.opensprite_r1_bank
+JOINT = args.opensprite_bank is not None
+if JOINT:
+    import hashlib
+
+    os.environ["MACMIMIC_ROBOT"] = "opensprite"
+    args.embodiment = "opensprite"
+    args.velocity_command_norm = True
+    args.wm_mirror = 0.0  # the v5 ankle anchors and arm defaults are not exact sagittal reflections
+    if args.opensprite_r1_bank:
+        from supermimic_mlx.r1_reference import R1_BANK_SHA256, R1_RESET_WEIGHTS, check_r1_file
+
+        args.reference_sha256 = check_r1_file(args.opensprite_bank)
+        if args.init_from or args.resume:
+            parent_dir = args.init_from or args.resume
+            with open(os.path.join(parent_dir, "last.json")) as parent_file:
+                lineage = json.load(parent_file)["args"]
+            if not lineage.get("opensprite_r1_bank") or lineage.get("reference_sha256") != R1_BANK_SHA256:
+                raise ValueError("The Mac R1 run can only continue a checkpoint trained in this R1 mode.")
+        args.reference_clip_weights = dict(R1_RESET_WEIGHTS)
+    else:
+        with open(args.opensprite_bank, "rb") as bank_file:
+            args.reference_sha256 = hashlib.file_digest(bank_file, "sha256").hexdigest()
+    args.opensprite_bank = os.path.abspath(args.opensprite_bank)
+    args.pi_ref_skip = False  # both branches share a decoder that works without a reference at deployment
+    if args.num_envs % 2 or args.hist != 10:
+        raise ValueError("OpenSprite joint training requires even num_envs and a ten-frame history")
+
 NET_KEYS = ("wm_hidden", "enc_hidden", "dec_hidden", "wm_structured", "pi_ref_skip", "hist", "goal_frames", "horizon", "goal_stride")
 if args.init_from:  # the pretrained run fixes the network architecture
     _src = json.load(open(os.path.join(args.init_from, "args.json")))
+    if _src.get("embodiment", "g1") != ("opensprite" if JOINT else "g1"):
+        raise ValueError("The source checkpoint and the training robot must have the same embodiment")
     for _k in NET_KEYS:
         setattr(args, _k, _src[_k])
 
@@ -268,7 +302,7 @@ from supermimic_mlx.motion import MotionLib  # noqa: E402
 from supermimic_mlx import networks  # noqa: E402
 from supermimic_mlx.networks import Critic, WorldModel, policy_from_args, state_error  # noqa: E402
 from supermimic_mlx.optim import MuonAdam, clip_grad_norm, clip_grad_value, flat, unflat  # noqa: E402
-from supermimic_mlx.robots import g1  # noqa: E402
+from supermimic_mlx.robots import active as robot  # noqa: E402
 from supermimic_mlx.scene import CONTROL_DT  # noqa: E402
 from supermimic_mlx.sim import TrackingSim, XiLayout  # noqa: E402
 
@@ -318,9 +352,18 @@ os.makedirs(args.log_dir, exist_ok=True)
 json.dump(dict(vars(args), hw=HW), open(os.path.join(args.log_dir, "args.json"), "w"), indent=2)
 print("args:", json.dumps(vars(args)), flush=True)
 
-J = len(g1.JOINT_NAMES)
+J = len(robot.JOINT_NAMES)
 kin = Kinematics()
-motion = MotionLib.from_dir(g1.MOTION_DIR, kin, g1.load_motion)
+motion = (
+    robot.motion_library(args.opensprite_bank, kin)
+    if JOINT
+    else MotionLib.from_dir(robot.MOTION_DIR, kin, robot.load_motion)
+)
+if args.opensprite_r1_bank:
+    from supermimic_mlx.r1_reference import validate_clip_layout
+
+    validate_clip_layout(motion.names, motion.clip_len_np)
+    motion.reset_clip_mass = np.array([args.reference_clip_weights[name] for name in motion.names])
 layout = XiLayout()
 mdp = MDP(kin, motion, layout.dim)
 K, Hh, HZ = args.goal_frames, args.hist, args.horizon
@@ -352,6 +395,13 @@ print(f"world model {n_params(wm) / 1e6:.2f} M, policy {n_params(pi) / 1e6:.2f} 
 
 # every array a compiled step may read or write
 STATE = [wm.state, pi.state, critic.state, opt_wm.state, opt_pi.state, opt_v.state, CTR, mx.random.state]
+if JOINT:
+    from supermimic_mlx import velocity
+
+    vel = velocity.Learner(pi, wm, mdp, layout, motion, args)
+    STATE.extend(vel.state)
+    half_envs = args.num_envs // 2
+    commands = velocity.Commands(half_envs, motion, args.seed + 13)
 STATE += [sh["p"] for sh in SHADOW if sh["d"] > 0]
 if EMA is not None:
     STATE.append(EMA["p"])
@@ -363,6 +413,10 @@ if args.init_from:
     wm.update(unflat(ck["wm"]))
     if not args.init_wm_only:
         pi.update(unflat(ck["pi_live"])), critic.update(unflat(ck["critic"]))
+        if JOINT:
+            vel.encoder.update(unflat(ck["vel_live"]))
+            vel.critic.update(unflat(ck["vel_critic"]))
+            vel.avg.update(ck["velocity"])
         if EMA is not None:
             EMA["p"].update(ck.get("pi_avg", ck["pi_live"]))
             EMA["n"] = 1  # continue the average from the pretrained one
@@ -384,6 +438,21 @@ if args.resume:
         EMA["n"] = int(ck["meta"]["ema_n"])
         for sh in SHADOW:  # the shadows are not checkpointed: they continue from the main average
             sh["p"].update(ck["pi_avg"])
+    if JOINT:
+        if ck["meta"]["args"].get("reference_sha256") != args.reference_sha256:
+            raise ValueError("Cannot resume with a different OpenSprite reference bank")
+        vel.encoder.update(unflat(ck["vel_live"]))
+        vel.avg.update(ck["velocity"])
+        optimizers = [(vel.opt, "vel_opt")]
+        if not args.reset_critic:
+            vel.critic.update(unflat(ck["vel_critic"]))
+            optimizers.append((vel.opt_v, "vel_opt_v"))
+        for optimizer, key in optimizers:
+            for name, value in ck[key].items():
+                if isinstance(value, dict):
+                    optimizer.state[name].update(value)
+                else:
+                    optimizer.state[name] = value
     meta = ck["meta"]
     start_it, wall_offset, sim_steps = int(meta["iteration"]), float(meta["wall_time"]), int(meta["sim_steps"])
     RESUME_CTRL = meta.get("ctrl")
@@ -554,7 +623,7 @@ def _pi_loss(S, o_hist, a_prev, f, xi, xi_n):
     Ss, As, Aps, Fs, Gs = [], [], [], [], []
     for _ in range(HZ):
         Aps.append(a_prev)
-        f1 = f + 1
+        f1 = mx.minimum(f + 1, motion.clip_end[motion.clip_id[f]]) if JOINT else f + 1
         if CKPT_BPTT:
             out = step(*S, o_hist, f1, xi, xi_n, g)
             S, a_prev, o_hist = tuple(out[:6]), out[6], out[7]
@@ -590,7 +659,9 @@ def _gae_targets(V, rews, dones):
     return mx.stack(out[::-1])
 
 
-def _policy_update(s, hs, ha, hxi, hf, xi, f, a_prev, lr_pi, lr_v, ema_w):
+def _policy_update(s, hs, ha, hxi, hf, xi, f, a_prev, lr_pi, lr_v, ema_w, *velocity_batch):
+    if JOINT:
+        vel.update(*velocity_batch, lr_pi, lr_v, ema_w, HZ)
     S = unflatten_state(s)
     xi_n = layout.normalize(xi)
     o_hist = mdp.add_noise(mdp.obs(unflatten_state(hs), ha, hxi, hf))
@@ -676,7 +747,12 @@ def sample_valid_starts(B: int):
     picks = [x for x in picks if x is not None]
     foc = (np.concatenate([x[0] for x in picks]), np.concatenate([x[1] for x in picks])) if picks else None
     nu = B - (len(foc[0]) if foc is not None else 0)
-    s, h = buffer.sample_starts(2 * nu, Hh)
+    if JOINT:
+        ages = buffer.rng.integers(0, buffer.size, 2 * nu)
+        motion_envs = buffer.rng.integers(0, half_envs, 2 * nu)
+        s, h = buffer.starts_at(ages, motion_envs, Hh)
+    else:
+        s, h = buffer.sample_starts(2 * nu, Hh)
     f = s["f"]
     ok = f + HZ <= motion.clip_end_np[motion.clip_id_np[f]]
     idx = np.argsort(~ok, kind="stable")[:nu]
@@ -689,12 +765,21 @@ def sample_valid_starts(B: int):
 
 def pi_starts():
     with prof("pi.sample"):
-        return sample_valid_starts(args.pi_batch)
+        if not JOINT:
+            return sample_valid_starts(args.pi_batch)
+        B = args.pi_batch // 2
+        motion_starts = sample_valid_starts(B)
+        age = buffer.rng.integers(0, buffer.size, B)
+        envs = buffer.rng.integers(half_envs, args.num_envs, B)
+        return motion_starts, buffer.starts_at(age, envs, Hh)
 
 
 def pi_inputs(lr_pi, lr_v, starts=None):
     """Host side of the policy update: sampled starts and histories, learning rates, the EMA weight."""
-    s, h = starts if starts is not None else pi_starts()
+    starts = starts if starts is not None else pi_starts()
+    if JOINT:
+        starts, (vs, vh) = starts
+    s, h = starts
     ema_w = 0.0
     if EMA is not None:
         d = args.pi_ema_early if args.pi_ema_early > 0 and it < args.pi_ema_switch else args.pi_ema
@@ -704,6 +789,11 @@ def pi_inputs(lr_pi, lr_v, starts=None):
         xs = (mx.array(s["s"]), mx.array(h["s"]), mx.array(h["a_prev"]), mx.array(h["xi"]), mx.array(h["f"]),
               mx.array(s["xi"]), mx.array(s["f"]), mx.array(s["a_prev"]), mx.array(lr_pi), mx.array(lr_v),
               mx.array(ema_w, dtype=mx.float32))  # fmt: skip
+    if JOINT:
+        xs += tuple(
+            mx.array(x)
+            for x in (vs["s"], vh["s"], vh["a_prev"], vh["xi"], vh["f"], vs["xi"], vs["f"], vs["a_prev"], vs["command"])
+        )
     return xs
 
 
@@ -718,7 +808,24 @@ env = TrackingSim(args.num_envs, motion, mdp, layout, gamma=args.gamma, fail_res
                   seed=args.seed, nthread=args.sim_threads, backend=args.sim_backend)  # fmt: skip
 if RESUME_CTRL is not None:
     env.bin_G, env.bin_fail, env.bin_w_avg = (np.array(RESUME_CTRL[k]) for k in ("bin_G", "bin_fail", "bin_w_avg"))
-buffer = ReplayBuffer(args.buffer_steps, args.num_envs, J, layout.dim, seed=args.seed)
+buffer = ReplayBuffer(
+    args.buffer_steps,
+    args.num_envs,
+    J,
+    layout.dim,
+    seed=args.seed,
+    extra_fields={"command": (5, np.float32)} if JOINT else None,
+)
+if JOINT:
+
+    def command_outcome(s, a, prev, rewards, terms):
+        sub = slice(half_envs, None)
+        vr = vel.real_reward(mx.array(s[sub]), mx.array(commands.cmd), mx.array(a[sub]), mx.array(prev[sub]))
+        q = s[sub, 3:7]
+        fallen = (s[sub, 2] < 0.25) | ((1 - 2 * (q[:, 1] ** 2 + q[:, 2] ** 2)) < 0.3)
+        return np.concatenate((rewards[:half_envs], np.array(vr))), np.concatenate((terms[:half_envs], fallen))
+
+    env.command_outcome = command_outcome
 if args.resume and os.path.exists(os.path.join(args.resume, "buffer.npz")):  # a fork point written by --snap_at
     with np.load(os.path.join(args.resume, "buffer.npz")) as _z:
         if _z["s"].shape == buffer.data["s"].shape:
@@ -760,24 +867,35 @@ def _obs_goal(s, a_prev, xi, f, fresh, hist, key):
     return o, hist, motion.goal(f, K)
 
 
-def _act(s, a_prev, xi, f, fresh, hist, k1, k2):
+def _act(s, a_prev, xi, f, fresh, hist, k1, k2, *command):
     """Sequential collection (upstream): the normalizers see o and g before the action is taken."""
     o, hist, g = _obs_goal(s, a_prev, xi, f, fresh, hist, k1)
     pi.obs_norm.update(o)
     pi.goal_norm.update(g)
-    a = pi(hist, g)
+    if JOINT:
+        vel.encoder.command_norm.update(command[0])
+        va, _ = velocity.action(pi, vel.encoder, hist[half_envs:], command[0])
+        a = mx.concatenate((pi(hist[:half_envs], g[:half_envs]), va))
+    else:
+        a = pi(hist, g)
     return mx.clip(a + args.action_noise * mx.random.normal(a.shape, key=k2), -20, 20), hist
 
 
-def _act_snap(s, a_prev, xi, f, fresh, hist, k1, k2):
+def _act_snap(s, a_prev, xi, f, fresh, hist, k1, k2, *command):
     """--overlap: the action of the snapshot policy (normalizers of iteration i - 1); o and g are returned so that the
     normalizer updates can be applied once the learner is done."""
     o, hist, g = _obs_goal(s, a_prev, xi, f, fresh, hist, k1)
-    a = ACT_PI(hist, g)
+    if JOINT:
+        va, _ = velocity.action(ACT_PI, vel.snapshot, hist[half_envs:], command[0])
+        a = mx.concatenate((ACT_PI(hist[:half_envs], g[:half_envs]), va))
+    else:
+        a = ACT_PI(hist, g)
     return mx.clip(a + args.action_noise * mx.random.normal(a.shape, key=k2), -20, 20), hist, o, g
 
 
-def _pi_norms(o, g):
+def _pi_norms(o, g, *cmd):
+    if JOINT:
+        vel.encoder.command_norm.update(cmd[0])
     pi.obs_norm.update(o)
     pi.goal_norm.update(g)
     return mx.zeros(())
@@ -792,7 +910,11 @@ def _wm_norms(s, s1, a, xi):
 
 
 act_c = mx.compile(_act, inputs=STATE, outputs=STATE)
-act_snap_c = mx.compile(_act_snap, inputs=[ACT_PI.state], outputs=[]) if args.overlap else None
+act_snap_c = (
+    mx.compile(_act_snap, inputs=[ACT_PI.state] + ([vel.snapshot.state] if JOINT else []), outputs=[])
+    if args.overlap
+    else None
+)
 pi_norms_c = mx.compile(_pi_norms, inputs=STATE, outputs=STATE)
 wm_norms_c = mx.compile(_wm_norms, inputs=STATE, outputs=STATE)
 
@@ -811,6 +933,9 @@ def collect(n_steps: int, stats: dict, deferred: list | None = None):
         s = env.state_flat()
         args_ = (mx.array(s), mx.array(env.a_prev), mx.array(env.xi), mx.array(env.f.astype(np.int32)), mx.array(env.ep_step == 0),
                  OBS_HIST["h"], *_keys())  # fmt: skip
+        if JOINT:
+            packed = commands.sample(env.f[half_envs:], env.ep_step[half_envs:])
+            args_ += (mx.array(packed[:, :3]),)
         with prof("col.act"):
             if deferred is None:
                 a, OBS_HIST["h"] = act_c(*args_)
@@ -825,8 +950,11 @@ def collect(n_steps: int, stats: dict, deferred: list | None = None):
         if deferred is None:
             wm_norms_c(*tr)
         else:
-            deferred.append(((o, g), tr))
+            norms = (o, g, mx.array(packed[:, :3])) if JOINT else (o, g)
+            deferred.append((norms, tr))
         with prof("col.buffer"):
+            if JOINT:
+                out["command"] = np.concatenate((np.zeros_like(packed), packed))
             buffer.add(out)
         with prof("col.tail"):
             out = env.step_tail(out)
@@ -838,8 +966,8 @@ def collect(n_steps: int, stats: dict, deferred: list | None = None):
 
 
 def apply_deferred(deferred: list):
-    for (o, g), tr in deferred:
-        pi_norms_c(o, g)
+    for norms, tr in deferred:
+        pi_norms_c(*norms)
         wm_norms_c(*tr)
     deferred.clear()
 
@@ -1056,7 +1184,10 @@ def save_ckpt(it: int, wall: float, full: bool, snap: bool = False):
         os.makedirs(out_dir, exist_ok=True)
         np.savez(os.path.join(out_dir, "buffer.npz"), ptr=buffer.ptr, size=buffer.size, **buffer.data)
     else:
-        save_tree(os.path.join(args.log_dir, f"ckpt_{it:06d}"), {"pi": pol, "meta": meta})
+        save_tree(
+            os.path.join(args.log_dir, f"ckpt_{it:06d}"),
+            {"pi": pol, "meta": meta, **({"velocity": vel.avg} if JOINT else {})},
+        )
         for sh in SHADOW:
             d = os.path.join(args.log_dir, f"shadow_{sh['d']:g}")
             os.makedirs(d, exist_ok=True)
@@ -1069,6 +1200,14 @@ def save_ckpt(it: int, wall: float, full: bool, snap: bool = False):
         tree = {"wm": flat(wm.parameters()), "pi_live": flat(pi.parameters()), "critic": flat(critic.parameters()), "meta": meta}
         for o, k in ((opt_wm, "opt_wm"), (opt_pi, "opt_pi"), (opt_v, "opt_v")):
             tree[k] = {"t": o.state["t"], **{sub: o.state[sub] for sub in ("m", "v", "buf") if o.state[sub]}}
+        if JOINT:
+            tree.update(
+                vel_live=flat(vel.encoder.parameters()),
+                velocity=vel.avg,
+                vel_critic=flat(vel.critic.parameters()),
+                vel_opt=vel.opt.state,
+                vel_opt_v=vel.opt_v.state,
+            )
         if EMA is not None:
             tree["pi_avg"] = EMA["p"]
         save_tree(os.path.join(out_dir, "last"), tree)
@@ -1176,6 +1315,9 @@ for it in range(start_it, args.iterations):
         # are applied
         snap = flat(pi.parameters())
         ACT_PI.update(unflat(snap))
+        if JOINT:
+            vel.snapshot.update(vel.encoder.parameters())
+            mx.eval(vel.snapshot.parameters())
         ema_snap = dict(EMA["p"]) if EMA is not None else None
         if PRE is not None and PRE["it"] == it:  # sampled after the previous collection: the same buffer and draws as now
             wm_in, starts = PRE["wm"], PRE["pi"]

@@ -7,26 +7,26 @@ from __future__ import annotations
 import mujoco
 import numpy as np
 
-from .robots import g1
+from .robots import active as robot
 
 CONTROL_DT = 0.02
-DECIMATION = 4  # 4 physics substeps of 5 ms per 50 Hz control step
+DECIMATION = robot.DECIMATION
 PHYSICS_DT = CONTROL_DT / DECIMATION
 
 
 def robot_entity_spec() -> mujoco.MjSpec:
-    spec = g1.robot_spec()
-    for name in g1.JOINT_NAMES:
-        effort, _, arm = g1.motor_of(name)
+    spec = robot.robot_spec()
+    for name in robot.JOINT_NAMES:
+        effort, _, arm = robot.motor_of(name)
         spec.joint(name).armature = arm
         act = spec.add_actuator(name=name, target=name)
         act.trntype = mujoco.mjtTrn.mjTRN_JOINT
         act.dyntype = mujoco.mjtDyn.mjDYN_NONE
         act.gaintype = mujoco.mjtGain.mjGAIN_FIXED
         act.biastype = mujoco.mjtBias.mjBIAS_AFFINE
-        act.gainprm[0] = g1.kp(name)
-        act.biasprm[1] = -g1.kp(name)
-        act.biasprm[2] = -g1.kd(name)
+        act.gainprm[0] = robot.kp(name)
+        act.biasprm[1] = -robot.kp(name)
+        act.biasprm[2] = -robot.kd(name)
         act.inheritrange = 0.0
         act.ctrllimited = False  # setpoints beyond the joint limits are allowed (force is still bounded)
         act.forcelimited = True
@@ -39,13 +39,13 @@ def scene_spec(visual: bool = False) -> mujoco.MjSpec:
     world.worldbody.add_body(name="terrain").add_geom(name="terrain", type=mujoco.mjtGeom.mjGEOM_PLANE, size=(0, 0, 0.01))
     if visual:
         world.worldbody.add_light(name="sun", pos=(0, 0, 1.5), type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL)
-    robot = robot_entity_spec()
+    entity = robot_entity_spec()
     frame = world.worldbody.add_frame()
-    frame.attach_body(robot.body("pelvis"), "robot/", "")
-    q0 = np.zeros(7 + len(g1.JOINT_NAMES))
-    q0[:3], q0[3] = g1.INIT_ROOT_POS, 1.0
-    q0[7:] = g1.default_joint_pos()
-    world.add_key(name="init_state", qpos=q0, ctrl=g1.default_joint_pos())
+    frame.attach_body(entity.body(robot.TRACKED_BODIES[0]), "robot/", "")
+    q0 = np.zeros(7 + len(robot.JOINT_NAMES))
+    q0[:3], q0[3] = robot.INIT_ROOT_POS, 1.0
+    q0[7:] = robot.default_joint_pos()
+    world.add_key(name="init_state", qpos=q0, ctrl=robot.default_joint_pos())
     return world
 
 
@@ -66,10 +66,24 @@ def apply_options(m: mujoco.MjModel) -> None:
     o.disableflags |= mujoco.mjtDisableBit.mjDSBL_AUTORESET
 
 
-def build_model(visual: bool = False) -> mujoco.MjModel:
+def build_model(visual: bool = False, *, studio: bool = False) -> mujoco.MjModel:
     """Compiled scene; ``visual`` keeps the visual geoms (rendering), otherwise they are removed (faster stepping and
     smaller models; they never collide)."""
     spec = scene_spec(visual)
+    if studio:
+        spec.add_texture(name="sky", type=mujoco.mjtTexture.mjTEXTURE_SKYBOX, builtin=mujoco.mjtBuiltin.mjBUILTIN_GRADIENT,
+                         rgb1=[0.16, 0.18, 0.22], rgb2=[0.02, 0.02, 0.03], width=512, height=3072)  # fmt: skip
+        spec.add_texture(name="grid", type=mujoco.mjtTexture.mjTEXTURE_2D, builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
+                         rgb1=[0.13, 0.14, 0.16], rgb2=[0.11, 0.12, 0.14], width=512, height=512,
+                         mark=mujoco.mjtMark.mjMARK_EDGE, markrgb=[0.24, 0.26, 0.3])  # fmt: skip
+        mat = spec.add_material(name="grid", texrepeat=[1, 1], texuniform=True, reflectance=0.08)
+        mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "grid"
+        spec.geom("terrain").material = "grid"
+        spec.visual.quality.shadowsize = 4096
+        spec.visual.headlight.ambient = [0.35, 0.35, 0.38]
+        spec.visual.headlight.diffuse = [0.55, 0.55, 0.58]
+        spec.visual.headlight.specular = [0.1, 0.1, 0.1]
+        spec.visual.rgba.haze = [0.05, 0.055, 0.07, 1.0]  # the horizon blends into the sky
     if not visual:
         for geom in list(spec.geoms):
             if geom.contype == 0 and geom.conaffinity == 0:
@@ -86,11 +100,11 @@ class Index:
     """Addresses in the compiled scene."""
 
     def __init__(self, m: mujoco.MjModel):
-        self.joint_q = np.array([m.jnt_qposadr[m.joint("robot/" + n).id] for n in g1.JOINT_NAMES])
-        self.joint_v = np.array([m.jnt_dofadr[m.joint("robot/" + n).id] for n in g1.JOINT_NAMES])
-        assert (self.joint_q == np.arange(7, 7 + len(g1.JOINT_NAMES))).all()
-        assert (self.joint_v == np.arange(6, 6 + len(g1.JOINT_NAMES))).all()
-        self.com_body = m.body("robot/" + g1.COM_BODY).id
+        self.joint_q = np.array([m.jnt_qposadr[m.joint("robot/" + n).id] for n in robot.JOINT_NAMES])
+        self.joint_v = np.array([m.jnt_dofadr[m.joint("robot/" + n).id] for n in robot.JOINT_NAMES])
+        assert (self.joint_q == np.arange(7, 7 + len(robot.JOINT_NAMES))).all()
+        assert (self.joint_v == np.arange(6, 6 + len(robot.JOINT_NAMES))).all()
+        self.com_body = m.body("robot/" + robot.COM_BODY).id
         robot_bodies = {m.body(b).id for b in range(m.nbody) if m.body(b).name.startswith("robot/")}
         self.robot_geoms = np.array([g for g in range(m.ngeom) if m.geom_bodyid[g] in robot_bodies])
         self.ground_geoms = np.array([g for g in range(m.ngeom) if m.geom_bodyid[g] == 0])

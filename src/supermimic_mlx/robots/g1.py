@@ -17,6 +17,8 @@ DATA_DIR = os.environ.get("SUPERMIMIC_DATA", os.path.join(REPO, "data"))
 MJCF_PATH = os.path.join(DATA_DIR, "g1_description", "g1_29dof.xml")
 MOTION_DIR = os.path.join(DATA_DIR, "lafan1_g1")
 
+DECIMATION = 4
+
 ARMATURE_5020 = 0.003609725
 ARMATURE_7520_14 = 0.010177520
 ARMATURE_7520_22 = 0.025101925

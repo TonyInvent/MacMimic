@@ -1,0 +1,9 @@
+{
+  "frames": 1750,
+  "max_abs_action_difference": 1.430511474609375e-06,
+  "cpu_inference_ms_p50": 0.181354,
+  "cpu_inference_ms_p95": 0.24520814999999996,
+  "model_sha256": "751e1107a971a1ebdcc06f1b71901b7dea18600eac381a88bd35d3b9799e1ce9",
+  "completed": true,
+  "source": "upstream PolicyObservationHistory on simulated joint and IMU feedback"
+}

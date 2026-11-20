@@ -10,7 +10,7 @@ import mlx.core as mx
 import mujoco
 import numpy as np
 
-from .robots import g1
+from .robots import active as robot
 from .rotations import axis_angle_to_mat, mm3, mv3, quat_to_mat
 
 
@@ -21,7 +21,7 @@ def cross(a: mx.array, b: mx.array) -> mx.array:
 
 
 class Kinematics:
-    def __init__(self, mjcf_path: str = g1.MJCF_PATH, joint_names=g1.JOINT_NAMES, tracked=g1.TRACKED_BODIES):
+    def __init__(self, mjcf_path: str = robot.MJCF_PATH, joint_names=robot.JOINT_NAMES, tracked=robot.TRACKED_BODIES):
         m = mujoco.MjModel.from_xml_path(mjcf_path)
         jname_to_idx = {n: i for i, n in enumerate(joint_names)}
         bodies, parent, joint_idx, axes, offs_p, offs_q = [], [], [], [], [], []

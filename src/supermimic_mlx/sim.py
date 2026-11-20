@@ -21,18 +21,18 @@ from mujoco.batch import Batch
 from . import nprot
 from .mdp import MAX_STEP_REWARD, MDP, unflatten_state
 from .motion import MotionLib
-from .robots import g1
+from .robots import active as robot
 from .scene import DECIMATION, Index, build_model
 
 
 class XiLayout:
     """Slices of the sim context xi and its normalization (center, half-range) for the networks."""
 
-    def __init__(self, J: int = len(g1.JOINT_NAMES)):
+    def __init__(self, J: int = len(robot.JOINT_NAMES)):
         self.slices = {"friction": slice(0, 1), "joint_offset": slice(1, 1 + J), "com": slice(1 + J, 4 + J)}
-        lo, hi = g1.FRICTION_RANGE
+        lo, hi = robot.FRICTION_RANGE
         self.center = np.concatenate(([(lo + hi) / 2], np.zeros(J), np.zeros(3))).astype(np.float32)
-        self.scale = np.concatenate(([(hi - lo) / 2], np.full(J, g1.JOINT_OFFSET), np.full(3, 0.05))).astype(np.float32)
+        self.scale = np.concatenate(([(hi - lo) / 2], np.full(J, robot.JOINT_OFFSET), np.full(3, 0.05))).astype(np.float32)
         self.dim = 4 + J
         self.center_mx, self.scale_mx = mx.array(self.center), mx.array(self.scale)
 
@@ -62,7 +62,7 @@ class TrackingSim:
                  nthread: int | None = None, backend: str = "mujoco"):  # fmt: skip
         """``backend``: "mujoco" (CPU MuJoCo, mujoco.batch) or "superdex" (SuperDex Physics, supermimic_mlx.sdx;
         ``nthread`` worker processes)."""
-        self.N, self.J = num_envs, len(g1.JOINT_NAMES)
+        self.N, self.J = num_envs, len(robot.JOINT_NAMES)
         self.motion, self.mdp, self.layout, self.gamma = motion, mdp, layout, gamma
         self.eval_mode = eval_mode
         self.randomize = (not eval_mode) if randomize is None else randomize
@@ -80,19 +80,19 @@ class TrackingSim:
         else:
             self.batch = Batch(self.model, num_envs, nthread=min(nthread, max(1, num_envs // 8)))
         self.qpos, self.qvel, self.ctrl = self.batch.bind("qpos"), self.batch.bind("qvel"), self.batch.bind("ctrl")
-        self.default_q = g1.default_joint_pos()
-        self.alpha = g1.action_scales()
+        self.default_q = robot.default_joint_pos()
+        self.alpha = robot.action_scales()
         # ---- sim context xi: friction (once per env), joint offsets (per episode), torso CoM offset (once per env) ----
         self.xi = np.zeros((num_envs, layout.dim), dtype=np.float32)
         sl = layout.slices
         if self.randomize:
-            fr = self.rng.uniform(*g1.FRICTION_RANGE, size=num_envs).astype(np.float32)
+            fr = self.rng.uniform(*robot.FRICTION_RANGE, size=num_envs).astype(np.float32)
             self.xi[:, sl["friction"]] = fr[:, None]
             gf = self.batch.expand("geom_friction")
             gf[:, self.ix.robot_geoms, 0] = fr[:, None]
             # The ground keeps its default friction (1.0): upstream sets the bodyid-0 geoms to the range's low end, but
             # mjlab's plane belongs to the "terrain" body, so that set is empty. MuJoCo takes the max of a contact pair.
-            com = np.stack([self.rng.uniform(lo, hi, num_envs) for lo, hi in g1.COM_RANGE], -1).astype(np.float32)
+            com = np.stack([self.rng.uniform(lo, hi, num_envs) for lo, hi in robot.COM_RANGE], -1).astype(np.float32)
             self.xi[:, sl["com"]] = com
             ipos = self.batch.expand("body_ipos")
             ipos[:, self.ix.com_body] = self.model.body_ipos[self.ix.com_body] + com
@@ -120,6 +120,7 @@ class TrackingSim:
         self._reward_fn = mx.compile(self._reward_term)
         self._reward_fn_cpu = mx.compile(self._reward_term)  # traced separately on the CPU stream (compiled graphs keep their stream)
         self.cpu = False  # reward / termination heads on the CPU (train.py --actor_device cpu)
+        self.command_outcome = None
         self.term_only = False  # termination only, in numpy, no reward (train.py's probe sweep: no GPU round trip)
         self.term_prob = 1.0  # training worlds: a world past the termination thresholds ends with this probability per step
         self._ref_z = np.array(motion.root_p[:, 2], dtype=np.float32)
@@ -151,6 +152,9 @@ class TrackingSim:
             probs = (1 - self.fail_reset) * probs + self.fail_reset * (fail if fail.sum() > 0 else probs)
         if self.focus_q is not None and self.focus_share > 0:
             probs = (1 - self.focus_share) * probs + self.focus_share * self.focus_q
+        if getattr(m, "reset_clip_mass", None) is not None:
+            from .r1_reference import with_clip_masses
+            probs = with_clip_masses(probs, m.bin_clip_np, m.reset_clip_mass)
         bins = self.rng.choice(m.num_bins, size=n, p=probs / probs.sum())
         start = m.bin_start_np[bins]
         end = np.minimum(start + 50, m.clip_end_np[m.bin_clip_np[bins]])  # keep >= 1 step before the clip end
@@ -172,11 +176,11 @@ class TrackingSim:
         p, R, v, w, q, qd = (x.astype(np.float64) for x in m.ref_state_np(frames))
         if self.reset_noise:
             u = lambda half: np.stack([self.rng.uniform(-h, h, n) for h in half], -1)  # noqa: E731
-            p = p + u(g1.RESET_POS)
-            R = nprot.so3_exp(u(g1.RESET_ROT)) @ R
-            v = v + u(g1.RESET_LIN_VEL)
-            w = w + u(g1.RESET_ANG_VEL)
-            q = q + self.rng.uniform(-g1.RESET_JOINT_POS, g1.RESET_JOINT_POS, q.shape)
+            p = p + u(robot.RESET_POS)
+            R = nprot.so3_exp(u(robot.RESET_ROT)) @ R
+            v = v + u(robot.RESET_LIN_VEL)
+            w = w + u(robot.RESET_ANG_VEL)
+            q = q + self.rng.uniform(-robot.RESET_JOINT_POS, robot.RESET_JOINT_POS, q.shape)
         q = np.clip(q, self.mdp.kin.q_lo_np, self.mdp.kin.q_hi_np)
         # MuJoCo reset first (model defaults; clears controls and the solver warm start), then the writes
         self.batch.reset(ids, stage=mujoco.mjtStage.mjSTAGE_NONE)
@@ -193,7 +197,7 @@ class TrackingSim:
         self.ep_disc_ret[ids] = 0.0
         self.ep_ret[ids] = 0.0
         if self.randomize:
-            self.xi[ids, self.layout.slices["joint_offset"]] = self.rng.uniform(-g1.JOINT_OFFSET, g1.JOINT_OFFSET, (n, self.J))
+            self.xi[ids, self.layout.slices["joint_offset"]] = self.rng.uniform(-robot.JOINT_OFFSET, robot.JOINT_OFFSET, (n, self.J))
 
     # ------------------------------------------------------------------ observation
     def observe(self, s_flat: np.ndarray | None = None) -> mx.array:
@@ -248,6 +252,8 @@ class TrackingSim:
         else:
             r, term = self._reward_fn(mx.array(s1), mx.array(f1.astype(np.int32)), mx.array(a_np), mx.array(a_prev))
         r, term = np.asarray(r, dtype=np.float64), np.asarray(term)
+        if self.command_outcome is not None:
+            r, term = self.command_outcome(s1, a_np, a_prev, r, term)
         if self.term_prob < 1.0 and not self.eval_mode:
             term = term & (self.rng.random(len(term)) < self.term_prob)
         # a diverged world (non-finite state; MuJoCo's auto-reset is off, see scene.apply_options), a non-finite action

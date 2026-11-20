@@ -1,4 +1,10 @@
-# MacMimic
+# MacMimic for OpenSprite v5
+
+This fork trains OpenSprite on Apple silicon with MacMimic and the reviewed Sprite SM-Walk R1 walking and standing references. On an M4 Pro with 48 GB, seed 49 completed 6,000 updates in 2 h 27 min. **Update 1,800** is the selected Xbox velocity policy. It walked at 0.278 m/s under a 0.40 m/s command in MuJoCo and stopped on trigger release. Right turns remained weak. Hardware testing of these weights is pending.
+
+[Run the policy or reproduce training](docs/opensprite.md) · [Download ONNX and MLX checkpoint](https://github.com/TonyInvent/MacMimic/releases/tag/opensprite-r1-mac-s49-it1800) · [35-second simulation video](docs/opensprite-r1/xbox_sequence.mp4) · [Evaluation results](docs/opensprite-r1/evaluation)
+
+## Original MacMimic G1 benchmark
 
 <p align="center"><img src="docs/assets/macmimic.gif" width="640" alt="The simulated Unitree G1, in white, doing a cartwheel and getting up from the floor next to the human reference motion, in blue"></p>
 
@@ -36,7 +42,7 @@ held for three checkpoints in a row.
 ## Quickstart
 
 ```bash
-git clone https://github.com/air23zj/macmimic && cd macmimic
+git clone https://github.com/TonyInvent/MacMimic && cd MacMimic
 uv sync
 bash tools/download_data.sh                                  # 40 LAFAN1 clips retargeted to the G1 -> data/
 uv run python tools/urdf_to_mjcf.py
@@ -173,7 +179,7 @@ docs/               project page (index.html, GitHub Pages) and the hill-climb r
 
 ## Attribution and licenses
 
-Code: MIT. Ported from [BlinkMimic](https://github.com/fuyichen0725/blinkmimic) (Fuyi Chen, MIT), which builds on
+This combined project uses the [GNU AGPL-3.0](LICENSE). Upstream MacMimic retains its [MIT license](licenses/MacMimic-MIT.txt). See the [third-party notices](THIRD_PARTY_NOTICES.md) for component and motion credits. MacMimic was ported from [BlinkMimic](https://github.com/fuyichen0725/blinkmimic) (Fuyi Chen, MIT), which builds on
 [supermimic_vibed](https://github.com/zita-ch/supermimic_vibed) (Chong Zhang, MIT) and
 [InstantTrack](https://github.com/Huy-Quang-Dao/instantTrack) (MIT); method: SuperMimic
 ([HybridRobotics/supermimic](https://github.com/HybridRobotics/supermimic), Apache-2.0; Liao et al. 2026), BeyondMimic

@@ -257,9 +257,9 @@ class Critic(nn.Module):
 
 def policy_from_args(a_: dict, obs_dim: int, goal_dim: int, J: int) -> Policy:
     from .motion import GOAL_Q_OFFSET
-    from .robots import g1
+    from .robots import active as robot
 
     widths = lambda k: tuple(int(x) for x in a_[k].split(","))  # noqa: E731
-    ref_skip = (GOAL_Q_OFFSET, g1.default_joint_pos().tolist(), g1.action_scales().tolist()) if a_.get("pi_ref_skip") else None
+    ref_skip = (GOAL_Q_OFFSET, robot.default_joint_pos().tolist(), robot.action_scales().tolist()) if a_.get("pi_ref_skip") else None
     return Policy(obs_dim, goal_dim, J, hist=a_["hist"], enc_hidden=widths("enc_hidden"), dec_hidden=widths("dec_hidden"),
                   ref_skip=ref_skip)  # fmt: skip

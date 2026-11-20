@@ -1,0 +1,38 @@
+{
+  "algorithm": "MacMimic",
+  "reference_reset_probabilities": {
+    "pm01_clearance_walk": 0.8,
+    "Neutral_ID_001135_001495_stand": 0.2
+  },
+  "source_repo_commit": "bc570e272f5ae07067d5c75c1c1b3051bf615b6a",
+  "pm01_source_commit": "63a82f744c78d48ee42f557fb472d7499702ee94",
+  "reference_bank_expected": "edd4ddd6f54e8a8a710481d11340ac6e38d6b944e75613c48e318fc3b32d296f",
+  "sources": [
+    "https://github.com/BeijingDynamics/open_sprite_rl/blob/63a82f744c78d48ee42f557fb472d7499702ee94/assets/references/g71/sprite0825_pm01_g55_ik_contactclean_wbt_v1.npz",
+    "https://theorangeduck.com/media/uploads/Geno/100style-retarget/bvh.zip",
+    "https://github.com/BeijingDynamics/OpenSprite-SuperMimic/blob/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/docs/REFERENCE_FUSION_CAMPAIGN_20261118.md"
+  ],
+  "clips": [
+    {
+      "name": "pm01_clearance_walk",
+      "frames": 572,
+      "seconds": 11.42,
+      "min_sole_height_m": 0.00018246459683077514,
+      "median_knees_deg": [
+        18.554039001464844,
+        -16.723894119262695
+      ]
+    },
+    {
+      "name": "Neutral_ID_001135_001495_stand",
+      "frames": 300,
+      "seconds": 5.98,
+      "min_sole_height_m": 0.0004552674029622301,
+      "median_knees_deg": [
+        4.356400489807129,
+        -4.139622688293457
+      ]
+    }
+  ],
+  "initialization": "random, seed 49"
+}
