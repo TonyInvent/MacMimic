@@ -4,15 +4,12 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 from .kinematics import cross
+from .command_ranges import COMMAND_RANGES
 from .mdp import invariant_features, inv_dim, unflatten_state
 from .networks import Critic, MLP, RunningNorm
 from .optim import MuonAdam, clip_grad_norm, flat, unflat
 from .rotations import mv3, T, yaw_mat
 from .robots import active as robot
-
-COMMAND_LOW = np.array([-0.3, -0.2, -0.6], np.float32)
-COMMAND_HIGH = np.array([0.6, 0.2, 0.6], np.float32)
-
 
 class CommandEncoder(nn.Module):
     def __init__(self, obs_dim, hist, normalized=True):
@@ -41,8 +38,9 @@ def motion_commands(motion):
 
 
 class Commands:
-    def __init__(self, n, motion, seed):
+    def __init__(self, n, motion, seed, profile="opensprite"):
         self.rng = np.random.default_rng(seed)
+        self.low, self.high = np.asarray(COMMAND_RANGES[profile], dtype=np.float32)
         self.references = motion_commands(motion)
         self.cmd = np.zeros((n, 3), np.float32)
         self.reference = np.zeros(n, bool)
@@ -51,7 +49,7 @@ class Commands:
         refresh = step % 250 == 0
         n = refresh.sum()
         if n:
-            sample = self.rng.uniform(COMMAND_LOW, COMMAND_HIGH, (n, 3))
+            sample = self.rng.uniform(self.low, self.high, (n, 3))
             sample[self.rng.random(n) < 0.1] = 0
             self.cmd[refresh] = sample
             self.reference[refresh] = self.rng.random(n) < 0.5
@@ -106,6 +104,7 @@ class Learner:
         self.avg = flat(self.encoder.parameters())
         self.refs = mx.array(motion_commands(motion))
         self.args = args
+        self.command_low, self.command_high = np.asarray(COMMAND_RANGES[args.velocity_commands], dtype=np.float32)
         self.grad = nn.value_and_grad(self.encoder, self.rollout)
         self.vgrad = nn.value_and_grad(self.critic, lambda x, y: ((self.critic.head(x) - y) ** 2).mean())
         self.state = [self.encoder.state, self.critic.state, self.opt.state, self.opt_v.state, self.avg]
@@ -128,7 +127,7 @@ class Learner:
             age = age + 1
             refresh = age >= 250
             ref = mx.where(refresh, mx.random.uniform(shape=ref.shape) < 0.5, ref)
-            new_cmd = mx.random.uniform(mx.array(COMMAND_LOW), mx.array(COMMAND_HIGH), shape=cmd.shape)
+            new_cmd = mx.random.uniform(mx.array(self.command_low), mx.array(self.command_high), shape=cmd.shape)
             new_cmd = mx.where(mx.random.uniform(shape=age.shape)[:, None] < 0.1, 0, new_cmd)
             cmd = mx.where(ref[:, None], self.refs[f], mx.where(refresh[:, None], new_cmd, cmd))
             age = mx.where(refresh, 0, age)

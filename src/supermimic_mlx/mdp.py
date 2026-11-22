@@ -108,13 +108,13 @@ class MDP:
         return o + (2 * mx.random.uniform(shape=o.shape, key=key) - 1) * self.obs_noise
 
     # ---------------- reward / termination ----------------
-    def _ref_bodies(self, p, R, f):
+    def _ref_bodies(self, p, R, f, positions):
         """Reference bodies re-anchored to the robot's root (xy + yaw), as in BeyondMimic."""
         m = self.motion
         rp, rR = m.root_p[f], m.root_R[f]
         dR = yaw_mat(mm3(R, T(rR)))
         anchor = mx.concatenate((p[..., :2], rp[..., 2:3]), -1)
-        ref_bp = mx.expand_dims(anchor, -2) + mv3(mx.expand_dims(dR, -3), m.body_p[f] - mx.expand_dims(rp, -2))
+        ref_bp = mx.expand_dims(anchor, -2) + mv3(mx.expand_dims(dR, -3), positions - mx.expand_dims(rp, -2))
         return ref_bp, dR, rp, rR
 
     def sole_geometry(self, pos, rotations):
@@ -131,12 +131,13 @@ class MDP:
         c, m = self.cfg, self.motion
         p, R, v, w, q, qd = S
         bp, bR, bv, bw = self.kin.forward(p, R, v, w, q, qd)
-        ref_bp, dR, rp, rR = self._ref_bodies(p, R, f)
-        ref_bR = mm3(mx.expand_dims(dR, -3), m.body_R[f])
+        ref_pos, ref_rot, ref_vel, ref_ang = m.reference_bodies(f)
+        ref_bp, dR, rp, rR = self._ref_bodies(p, R, f, ref_pos)
+        ref_bR = mm3(mx.expand_dims(dR, -3), ref_rot)
         e_pos = sum_last(((ref_bp - bp) ** 2)).mean(-1)
         e_ori = rot_angle_sq(ref_bR, bR).mean(-1)
-        e_lv = sum_last(((m.body_v[f] - bv) ** 2)).mean(-1)
-        e_av = sum_last(((m.body_w[f] - bw) ** 2)).mean(-1)
+        e_lv = sum_last(((ref_vel - bv) ** 2)).mean(-1)
+        e_av = sum_last(((ref_ang - bw) ** 2)).mean(-1)
         e_rp = sum_last(((rp - p) ** 2))
         e_ro = rot_angle_sq(rR, R)
         r_track = (
@@ -156,7 +157,7 @@ class MDP:
             r += CONTROL_DT * 0.25 * mx.expm1(-((actual_z - target_z) / 0.015) ** 2).mean(-1)
         if w_contact > 0:
             feet = mx.array(self.feet)
-            fz, rz = bp[..., feet, 2], m.body_p[f][..., feet, 2]
+            fz, rz = bp[..., feet, 2], ref_pos[..., feet, 2]
             c_sim = mx.sigmoid((CONTACT_Z - fz) / 0.005)
             c_ref = m.ref_contact[f] if m.ref_contact is not None else (rz < CONTACT_Z).astype(mx.float32)
             slip = sum_last((bv[..., feet, :2] ** 2))
@@ -189,7 +190,7 @@ class MDP:
         p, R, v, w, q, qd = S
         Ht = T(yaw_mat(R))
         bp = self.kin.forward(p, R, v, w, q, qd)[0]
-        ref_bp, _, rp, rR = self._ref_bodies(p, R, f)
+        ref_bp, _, rp, rR = self._ref_bodies(p, R, f, m.reference_bodies(f)[0])
         e_body = mv3(mx.expand_dims(Ht, -3), ref_bp - bp)
         e_body = e_body.reshape(e_body.shape[:-2] + (-1,))
         e_root = mv3(Ht, rp - p)

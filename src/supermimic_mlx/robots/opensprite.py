@@ -66,17 +66,26 @@ def motion_library(bank, kin):
             or str(data["asset_revision"]) != source.ASSET_REVISION
         ):
             raise ValueError("Reference bank and OpenSprite joint/asset contract differ")
+        if "qpos" in data:
+            names = data["motion_names"].astype(str).tolist()
+            lengths, poses = data["motion_lengths"], data["qpos"]
+            if (float(data["fps"]) != 50 or lengths.ndim != 1 or len(names) != len(lengths)
+                    or len(names) != len(set(names)) or np.any(lengths < 2)
+                    or poses.shape != (lengths.sum(), 7 + len(JOINT_NAMES))):
+                raise ValueError("Invalid compact 50 Hz OpenSprite reference bank")
+            return MotionLib.from_qpos50(names, lengths, poses, kin)
         root = list(data["body_names"].astype(str)).index("pelvis_link")
         names = data["motion_names"].astype(str).tolist()
+        # Each NPZ member access decompresses the whole array. Keep one compact
+        # root trajectory and one joint array for all clips.
+        positions = data["body_pos_w"][:, root].copy()
+        orientations = data["body_quat_w"][:, root].copy()
+        joints = data["joint_pos"]
+        fps = float(data["fps"])
         clips = {}
         for name, start, length in zip(names, data["motion_starts"], data["motion_lengths"], strict=True):
             frames = slice(start, start + length)
-            clips[name] = (
-                data["body_pos_w"][frames, root],
-                data["body_quat_w"][frames, root],
-                data["joint_pos"][frames],
-                float(data["fps"]),
-            )
+            clips[name] = positions[frames], orientations[frames], joints[frames], fps
         motion = MotionLib(names, kin, clips.__getitem__)
         from ..r1_reference import R1_RESET_WEIGHTS, validate_clip_layout
 
@@ -99,7 +108,7 @@ def motion_library(bank, kin):
                 value = bodies[:, root_index]
                 setattr(motion, key, value)
                 motion.np[key] = np.array(value)
-            motion.np["q"], motion.np["qd"] = data["joint_pos"], data["joint_vel"]
+            motion.np["q"], motion.np["qd"] = joints, data["joint_vel"]
             motion.q, motion.qd = mx.array(motion.np["q"]), mx.array(motion.np["qd"])
             motion.root_v_local = mv3(T(motion.root_R), motion.root_v)
             motion.root_w_local = mv3(T(motion.root_R), motion.root_w)

@@ -45,11 +45,7 @@ class MotionLib:
             j = j[i0] * (1 - a[:, None]) + j[i0 + 1] * a[:, None]
             quat = np.array(quat_slerp(mx.array(quat[i0]), mx.array(quat[i0 + 1]), mx.array(a)))
             ps.append(p), qs.append(quat), js.append(j), lens.append(n)
-        self.clip_len_np = np.array(lens, dtype=np.int64)
-        self.clip_start_np = np.concatenate(([0], np.cumsum(lens)[:-1])).astype(np.int64)
-        self.clip_end_np = self.clip_start_np + self.clip_len_np - 1  # last valid frame (inclusive)
-        self.num_frames = int(sum(lens))
-        self.clip_id_np = np.concatenate([np.full(n, i, dtype=np.int64) for i, n in enumerate(lens)])
+        self._index_clips(lens)
 
         root_p, root_R, root_v, root_w, jq, jqd = [], [], [], [], [], []
         for p, quat, j in zip(ps, qs, js):
@@ -77,6 +73,15 @@ class MotionLib:
         Rt = T(self.root_R)
         self.root_v_local = mv3(Rt, self.root_v)
         self.root_w_local = mv3(Rt, self.root_w)
+        mx.eval(self.body_p, self.body_R, self.body_v, self.body_w, self.root_v_local, self.root_w_local)
+
+    def _index_clips(self, lens):
+        self.clip_len_np = np.array(lens, dtype=np.int64)
+        self.clip_start_np = np.concatenate(([0], np.cumsum(lens)[:-1])).astype(np.int64)
+        self.clip_end_np = self.clip_start_np + self.clip_len_np - 1  # last valid frame (inclusive)
+        self.num_frames = int(sum(lens))
+        self.clip_id_np = np.concatenate([np.full(n, i, dtype=np.int64) for i, n in enumerate(lens)])
+
         # 1 s bins
         bin_clip, bin_start = [], []
         for c in range(len(lens)):
@@ -93,7 +98,44 @@ class MotionLib:
         self.clip_id = mx.array(self.clip_id_np.astype(np.int32))
         self.ref_contact = None
         self.goal_stride = 1  # goal frames f+1, f+1+s, ..., f+1+(K-1)s (supermimic_vibed v2: s = 5, ~0.9 s lookahead)
-        mx.eval(self.body_p, self.body_R, self.body_v, self.body_w, self.root_v_local, self.root_w_local)
+
+    @classmethod
+    def from_qpos50(cls, names, lengths, poses, kin):
+        """Keep the 50 Hz root and joints resident. Evaluate body FK only for sampled frames."""
+        obj = cls.__new__(cls)
+        obj.names = names
+        obj._index_clips(lengths)
+        obj.reference_kin = kin
+        p = np.ascontiguousarray(poses[:, :3], dtype=np.float32)
+        q = np.ascontiguousarray(poses[:, 7:], dtype=np.float32)
+        rot = np.empty((len(p), 3, 3), np.float32)
+        v, w, qd = np.empty_like(p), np.empty_like(p), np.empty_like(q)
+        for start in range(0, len(p), 32768):
+            sl = slice(start, start + 32768)
+            rot[sl] = np.asarray(quat_to_mat(mx.array(poses[sl, 3:7])))
+        for start in range(0, len(p), 32768):
+            idx = np.arange(start, min(start + 32768, len(p)))
+            clip = obj.clip_id_np[idx]
+            lo = np.maximum(idx - 1, obj.clip_start_np[clip])
+            hi = np.minimum(idx + 1, obj.clip_end_np[clip])
+            dt = ((hi - lo) * CONTROL_DT).astype(np.float32)[:, None]
+            v[idx] = (p[hi] - p[lo]) / dt
+            qd[idx] = (q[hi] - q[lo]) / dt
+            delta = mm3(mx.array(rot[hi]), T(mx.array(rot[lo])))
+            w[idx] = np.asarray(so3_log(delta)) / dt
+        obj.np = dict(root_p=p, root_R=rot, root_v=v, root_w=w, q=q, qd=qd)
+        for key, values in obj.np.items():
+            setattr(obj, key, mx.array(values))
+        obj.root_v_local = mv3(T(obj.root_R), obj.root_v)
+        obj.root_w_local = mv3(T(obj.root_R), obj.root_w)
+        mx.eval(obj.root_v_local, obj.root_w_local)
+        return obj
+
+    def reference_bodies(self, frame):
+        if hasattr(self, "reference_kin"):
+            return self.reference_kin.forward(self.root_p[frame], self.root_R[frame], self.root_v[frame],
+                                              self.root_w[frame], self.q[frame], self.qd[frame])
+        return self.body_p[frame], self.body_R[frame], self.body_v[frame], self.body_w[frame]
 
     @staticmethod
     def from_dir(path: str, kin: Kinematics, load_motion, glob_pat: str = "*.csv") -> "MotionLib":
@@ -104,11 +146,16 @@ class MotionLib:
     def set_ref_contact(self, feet: list[int], margin: float = 0.015, vmax: float = 0.5, q: float = 0.05) -> None:
         """Reference foot contact (num_frames, len(feet)) from a per-clip floor (the q-quantile of the foot height in
         the clip) + margin and horizontal speed below vmax (upstream --ref_contact_fix)."""
-        z = np.array(self.body_p[:, feet, 2])
-        vh = np.linalg.norm(np.array(self.body_v[:, feet, :2]), axis=-1)
+        z = np.empty((self.num_frames, len(feet)), np.float32)
+        vh = np.empty_like(z)
+        for start in range(0, self.num_frames, 8192):
+            sl = slice(start, start + 8192)
+            pos, _, vel, _ = self.reference_bodies(sl)
+            z[sl] = np.asarray(pos[:, feet, 2])
+            vh[sl] = np.linalg.norm(np.asarray(vel[:, feet, :2]), axis=-1)
         floor = np.zeros_like(z)
-        for c in range(len(self.names)):
-            s = self.clip_id_np == c
+        for start, end in zip(self.clip_start_np, self.clip_end_np):
+            s = slice(start, end + 1)
             floor[s] = np.quantile(z[s], q, axis=0, method="linear")
         self.ref_contact = mx.array(((z < floor + margin) & (vh < vmax)).astype(np.float32))
 

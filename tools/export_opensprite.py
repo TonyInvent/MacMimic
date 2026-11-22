@@ -110,6 +110,7 @@ def export(checkpoint, destination):
         policy_onnx_sha256=sha(output),
         joint_names=robot.JOINT_NAMES,
         command_layout=["vx", "vy", "yaw_rate"],
+        simulation_command_profile=args.get("velocity_commands", "opensprite"),
         policy_dt=0.02,
         physics_dt=0.002,
         observation_order=[

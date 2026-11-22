@@ -66,7 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
     sources = p.add_mutually_exclusive_group()
     sources.add_argument("--opensprite_r1_bank", help="Train from the published R1 walk/stand bank with fixed 80/20 reset probabilities.")
     sources.add_argument("--opensprite_bank", help="50 Hz OpenSprite NPZ. Enables joint motion and velocity training.")
+    sources.add_argument("--opensprite_motion_bank", help="50 Hz OpenSprite NPZ for the motion-only tracking experiment.")
     a = p.add_argument
+    from supermimic_mlx.command_ranges import COMMAND_RANGES
+    a("--velocity_commands", choices=tuple(COMMAND_RANGES), default="opensprite",
+      help="Command sampling range in OpenSprite simulation; paper uses SuperMimic Appendix G.")
     a("--preset", type=str, default="supermimic", choices=sorted(PRESETS))
     a("--num_envs", type=int, default=4096)
     a("--iterations", type=int, default=320_000)
@@ -255,12 +259,16 @@ args = parse_args()
 if args.opensprite_r1_bank:
     args.opensprite_bank = args.opensprite_r1_bank
 JOINT = args.opensprite_bank is not None
-if JOINT:
+if args.opensprite_motion_bank:
+    args.opensprite_bank = args.opensprite_motion_bank
+if args.velocity_commands == "paper" and not JOINT:
+    raise ValueError("The paper velocity command sampler requires joint OpenSprite training")
+if args.opensprite_bank:
     import hashlib
 
     os.environ["MACMIMIC_ROBOT"] = "opensprite"
     args.embodiment = "opensprite"
-    args.velocity_command_norm = True
+    args.velocity_command_norm = JOINT
     args.wm_mirror = 0.0  # the v5 ankle anchors and arm defaults are not exact sagittal reflections
     if args.opensprite_r1_bank:
         from supermimic_mlx.r1_reference import R1_BANK_SHA256, R1_RESET_WEIGHTS, check_r1_file
@@ -277,14 +285,15 @@ if JOINT:
         with open(args.opensprite_bank, "rb") as bank_file:
             args.reference_sha256 = hashlib.file_digest(bank_file, "sha256").hexdigest()
     args.opensprite_bank = os.path.abspath(args.opensprite_bank)
-    args.pi_ref_skip = False  # both branches share a decoder that works without a reference at deployment
-    if args.num_envs % 2 or args.hist != 10:
+    if JOINT:
+        args.pi_ref_skip = False  # shared decoder at velocity-policy deployment
+    if JOINT and (args.num_envs % 2 or args.hist != 10):
         raise ValueError("OpenSprite joint training requires even num_envs and a ten-frame history")
 
 NET_KEYS = ("wm_hidden", "enc_hidden", "dec_hidden", "wm_structured", "pi_ref_skip", "hist", "goal_frames", "horizon", "goal_stride")
 if args.init_from:  # the pretrained run fixes the network architecture
     _src = json.load(open(os.path.join(args.init_from, "args.json")))
-    if _src.get("embodiment", "g1") != ("opensprite" if JOINT else "g1"):
+    if _src.get("embodiment", "g1") != ("opensprite" if args.opensprite_bank else "g1"):
         raise ValueError("The source checkpoint and the training robot must have the same embodiment")
     for _k in NET_KEYS:
         setattr(args, _k, _src[_k])
@@ -356,7 +365,7 @@ J = len(robot.JOINT_NAMES)
 kin = Kinematics()
 motion = (
     robot.motion_library(args.opensprite_bank, kin)
-    if JOINT
+    if args.opensprite_bank
     else MotionLib.from_dir(robot.MOTION_DIR, kin, robot.load_motion)
 )
 if args.opensprite_r1_bank:
@@ -401,7 +410,7 @@ if JOINT:
     vel = velocity.Learner(pi, wm, mdp, layout, motion, args)
     STATE.extend(vel.state)
     half_envs = args.num_envs // 2
-    commands = velocity.Commands(half_envs, motion, args.seed + 13)
+    commands = velocity.Commands(half_envs, motion, args.seed + 13, args.velocity_commands)
 STATE += [sh["p"] for sh in SHADOW if sh["d"] > 0]
 if EMA is not None:
     STATE.append(EMA["p"])
@@ -623,7 +632,7 @@ def _pi_loss(S, o_hist, a_prev, f, xi, xi_n):
     Ss, As, Aps, Fs, Gs = [], [], [], [], []
     for _ in range(HZ):
         Aps.append(a_prev)
-        f1 = mx.minimum(f + 1, motion.clip_end[motion.clip_id[f]]) if JOINT else f + 1
+        f1 = mx.minimum(f + 1, motion.clip_end[motion.clip_id[f]]) if args.opensprite_bank else f + 1
         if CKPT_BPTT:
             out = step(*S, o_hist, f1, xi, xi_n, g)
             S, a_prev, o_hist = tuple(out[:6]), out[6], out[7]

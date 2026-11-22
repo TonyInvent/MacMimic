@@ -13,6 +13,7 @@ os.environ["MACMIMIC_ROBOT"] = "opensprite"
 import mujoco
 import numpy as np
 import onnxruntime as ort
+from supermimic_mlx.command_ranges import COMMAND_RANGES
 from supermimic_mlx.scene import build_model
 from supermimic_mlx.robots import opensprite as robot
 
@@ -31,6 +32,7 @@ class Controller:
             or contract["control_profile_sha256"] != robot.source.CONTROL_PROFILE_SHA256
         ):
             raise ValueError("Velocity policy package does not match the OpenSprite contract")
+        self.command_profile = contract.get("simulation_command_profile", "opensprite")
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = 1
         self.session = ort.InferenceSession(str(path), sess_options=opts, providers=["CPUExecutionProvider"])
@@ -106,13 +108,14 @@ def evaluate(controller, seconds):
 
 
 class StickMapping:
-    def __init__(self):
+    def __init__(self, profile="opensprite"):
+        self.paper = profile == "paper"
         self.ready = False
         self.held = False
         self.cmd = np.zeros(3)
 
-    def update(self, x, w, trigger):
-        centered = max(abs(x), abs(w)) <= 0.12
+    def update(self, x, w, trigger, lateral=0.0):
+        centered = max(abs(x), abs(w), abs(lateral) if self.paper else 0) <= 0.12
         if trigger < 0.2:
             self.ready = centered
             self.held = False
@@ -128,12 +131,17 @@ class StickMapping:
             target[0] = axis(x) * (FORWARD_LIMIT if x >= 0 else REVERSE_LIMIT)
             target[2] = axis(w) * YAW_LIMIT
         rates = np.array([0.05 if abs(target[0]) > abs(self.cmd[0]) else 0.1, 0, 0.2])
+        if self.paper:
+            low, high = (np.asarray(bound) for bound in COMMAND_RANGES["paper"])
+            stick = np.array([axis(x), axis(lateral), axis(w)])
+            target = np.where(stick >= 0, high, -low) * stick if self.held else np.zeros(3)
+            rates = np.maximum(high, -low)  # full-scale command in one second in simulation
         self.cmd += np.clip(target - self.cmd, -0.02 * rates, 0.02 * rates)
         return self.cmd
 
 
 class Xbox:
-    def __init__(self):
+    def __init__(self, profile="opensprite"):
         import pygame
         from pygame._sdl2 import controller
 
@@ -146,7 +154,9 @@ class Xbox:
             )
         self.pad = controller.Controller(found[0])
         self.pg = pygame
-        self.mapping = StickMapping()
+        self.mapping = StickMapping(profile)
+        if self.mapping.paper:
+            print("Appendix G simulation: left X controls lateral speed.")
         print("Center sticks, release LT, then hold LT. Left Y moves, right X turns. Ctrl-C exits.")
 
     def sample(self):
@@ -157,13 +167,14 @@ class Xbox:
         x = -self.pad.get_axis(pg.CONTROLLER_AXIS_LEFTY) / 32768
         w = -self.pad.get_axis(pg.CONTROLLER_AXIS_RIGHTX) / 32768
         trigger = self.pad.get_axis(pg.CONTROLLER_AXIS_TRIGGERLEFT) / 32767
-        return self.mapping.update(x, w, trigger)
+        lateral = -self.pad.get_axis(pg.CONTROLLER_AXIS_LEFTX) / 32768 if self.mapping.paper else 0.0
+        return self.mapping.update(x, w, trigger, lateral)
 
 
 def drive_sequence(controller, record=None):
     """Replay stick inputs through the live mapping, without a reset between commands."""
     controller.reset()
-    mapping = StickMapping()
+    mapping = StickMapping(controller.command_profile)
     phases = [
         ("start", 1.0, 0, 0, 0),
         ("enable", 1.0, 0, 0, 1),
@@ -172,11 +183,20 @@ def drive_sequence(controller, record=None):
         ("walking right", 7.0, 1, -1, 1),
         ("release", 7.0, 0, 0, 0),
     ]
+    phases = [(*phase, 0) for phase in phases]
+    if mapping.paper:
+        phases = [
+            ("start", 1, 0, 0, 0, 0), ("enable", 1, 0, 0, 1, 0),
+            ("forward", 5, .4, 0, 1, 0), ("strafe left", 5, 0, 0, 1, .4),
+            ("strafe right", 5, 0, 0, 1, -.4), ("reverse", 5, -.4, 0, 1, 0),
+            ("turn left", 5, .3, .3, 1, 0), ("turn right", 5, .3, -.3, 1, 0),
+            ("release", 5, 0, 0, 0, 0),
+        ]
     rows = []
-    for phase, seconds, forward, turn, trigger in phases:
+    for phase, seconds, forward, turn, trigger, lateral in phases:
         samples = []
         for i in range(round(seconds * 50)):
-            cmd = mapping.update(forward, turn, trigger)
+            cmd = mapping.update(forward, turn, trigger, lateral)
             measured, fallen = controller.step(cmd)
             if i >= round((seconds - min(2.0, seconds)) * 50):
                 samples.append(measured.copy())
@@ -268,7 +288,7 @@ if __name__ == "__main__":
     if a.xbox:
         import mujoco.viewer
 
-        pad = Xbox()
+        pad = Xbox(c.command_profile)
         with mujoco.viewer.launch_passive(c.model, c.data) as view:
             while view.is_running():
                 start = time.monotonic()

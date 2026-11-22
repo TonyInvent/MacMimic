@@ -1,5 +1,15 @@
 # MacMimic for OpenSprite v5
 
+## OpenSprite Xbox velocity policy · 100,000 updates
+
+The final Appendix G velocity policy trained on a 48 GB M4 Pro for 38 h 32 min. In MuJoCo it completed 2,688 five-second trials with zero falls and a median relative tracking error of 5.57%. It follows three-axis Xbox commands. Small reverse and lateral commands from rest remain weak. Physical robot evaluation is pending.
+
+[Download the ONNX + contract package](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-velocity-s49-it100000/opensprite-velocity-100k.zip) · [Sim-to-real interface and replay instructions](policies/opensprite-velocity-100k/README.md) · [Watch the 37-second final replay](policies/opensprite-velocity-100k/xbox_sequence.mp4)
+
+Motion sources are [Ubisoft La Forge LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) and [BONES-SEED](https://huggingface.co/datasets/bones-studio/seed). Training data includes [Motion Data by Bones Studio](https://bones.studio/). Use of the underlying dataset is subject to the [BONES Motion Capture Dataset License Agreement](https://bones.studio/info/seed-license).
+
+## Earlier Sprite SM-Walk R1 policy
+
 [![OpenSprite v5 walking, turning and stopping in a 35-second MuJoCo simulation](docs/opensprite-r1/xbox_sequence.webp)](docs/opensprite-r1/xbox_sequence.mp4)
 
 *Update 1,800 follows Xbox commands in MuJoCo. [Play the 35-second MP4](docs/opensprite-r1/xbox_sequence.mp4).*
