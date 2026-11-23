@@ -6,7 +6,7 @@
 
 *The 37-second replay shows forward walking, left and right strafing, reverse walking, turns and a stop on trigger release. [Play the final MP4](policies/opensprite-velocity-100k/xbox_sequence.mp4).*
 
-The final Appendix G velocity policy trained on a 48 GB M4 Pro for 38 h 32 min. In MuJoCo it completed 2,688 five-second trials with zero falls and a median relative tracking error of 5.57%. It follows three-axis Xbox commands. Small reverse and lateral commands from rest remain weak. Physical robot evaluation is pending.
+The final Appendix G velocity policy trained on a 48 GB M4 Pro for 38 h 32 min. In MuJoCo it completed 2,688 five-second trials with zero falls and a median relative tracking error of 5.57%. It follows three-axis Xbox commands. Small reverse and lateral commands from rest remain weak. On OpenSprite v5 hardware, the same ONNX completed a full-gain 300-second Xbox control window with zero CAN deadline misses and all 31 drives confirmed disabled on exit. [Jetson runtime, evidence and deployment](sim2real/README.md)
 
 [Download the ONNX + contract package](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-velocity-s49-it100000/opensprite-velocity-100k.zip) · [Sim-to-real interface and replay instructions](policies/opensprite-velocity-100k/README.md)
 
@@ -53,7 +53,7 @@ held for three checkpoints in a row.
 - `macmimic` is 2.04x faster than the BlinkMimic port on the mean of three runs (one seed alone: 1.95x). The target is a
   threshold: at their target checkpoints BlinkMimic tracks somewhat better (return 0.847, 3.9 cm body position error)
   than `macmimic` (0.822, 4.4 cm). Tracking metrics for every checkpoint shown are in [RESULTS.md](RESULTS.md).
-- Everything is simulation; the policy has not been run on a physical robot.
+- The G1 baseline results in this table are simulation measurements. The OpenSprite hardware runs are documented separately above.
 
 ## Quickstart
 

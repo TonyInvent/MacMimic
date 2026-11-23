@@ -1,0 +1,51 @@
+--- a/src/kcan_netdev.c
++++ b/src/kcan_netdev.c
+@@ -735,6 +735,20 @@
+ 
+ 	memcpy(f.msg.data, cf->data, f.msg.data_len);
+ 
++	/* Register the echo skb before the frame becomes visible to a USB writer.
++	 * A completion can run as soon as fifo_put publishes the frame. Registering
++	 * after start_writing loses an early completion and can pair this skb with
++	 * an unrelated completion when the 8-bit marker wraps. */
++	if (tx_hwts) {
++		err = KCAN_CAN_PUT_ECHO_SKB(skb, dev, mm);
++		skb_consumed = true;
++		if (err) {
++			stats->tx_dropped++;
++			goto free_out;
++		}
++		echo_stored = true;
++	}
++
+ 	/* put data into fifo */
+ 	err = kcan_fifo_put(&pdev->tx_fifo, &f);
+ 	if (err < 0) {
+@@ -743,6 +757,13 @@
+ 
+ 		/* stop netdev queue when KCAN FIFO is full */
+ 		stats->tx_fifo_errors++; /* just for informational purposes */
++
++		/* The frame was not published. Release the registered echo exactly once;
++		 * free_out releases the reserved marker, not the already consumed skb. */
++		if (echo_stored) {
++			KCAN_CAN_FREE_ECHO_SKB(dev, mm);
++			echo_stored = false;
++		}
+ 		netif_stop_queue(dev);
+ 
+ 		stats->tx_dropped++;
+@@ -772,12 +793,7 @@
+ 	kcan_lock_put_irqrestore(&pdev->isr_lock, lck_ctx);
+ 
+ 	if (tx_hwts) {
+-		KCAN_CAN_PUT_ECHO_SKB(skb, dev, mm);
+-		echo_stored = true;
+-		/* Hardware timestamp will be set in TX complete interrupt handler
+-		 * via skb_hwtstamps(tx_skb)->hwtstamp, then can_get_echo_skb()
+-		 * will notify the socket.
+-		 */
++		/* The echo was registered before publication; completion owns it now. */
+ 	} else if (priv->can.echo_skb_max) {
+ 		KCAN_CAN_PUT_ECHO_SKB(skb, dev, 0);
+ 		stats->tx_packets++;

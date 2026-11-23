@@ -1,6 +1,6 @@
 # OpenSprite v5 Xbox velocity policy · update 100,000
 
-This is the seed 49 MacMimic policy for the SuperMimic §4.5 / Appendix G velocity task on OpenSprite v5. Training from scratch took 38 h 32 min on a 48 GB M4 Pro. The archive includes the final actor, its matching JSON contract, the 37-second virtual Xbox replay and evaluation results. Hardware qualification is pending.
+This is the seed 49 MacMimic policy for the SuperMimic §4.5 / Appendix G velocity task on OpenSprite v5. Training from scratch took 38 h 32 min on a 48 GB M4 Pro. The archive includes the final actor, its matching JSON contract, the 37-second virtual Xbox replay and evaluation results. The 300-second Xbox trial on Jetson 253 passed with a lateral command limit of +/-0.42 m/s. The current deployment source raises this limit to +/-0.50 m/s. [Hardware results and runtime](../../sim2real/README.md)
 
 ## Load the policy
 
@@ -28,7 +28,7 @@ To drive in MuJoCo with a paired Xbox controller, run `.venv/bin/mjpython tools/
 | Output | 31 raw actions in contract joint order. Target position in radians equals `action_offset + action_scale * policy_action`. Feed the raw actions back into the history. |
 | Simulation command range | Forward −1.5 to +2.0 m/s, lateral ±1.32 m/s, yaw ±3.35 rad/s. Physical command limits require separate validation on the robot. |
 
-The contract records the asset revision, control-profile fingerprint, joint names, gains, limits, startup handoff and ONNX fingerprint. For sim-to-real integration, verify joint-to-motor order, signs, zero offsets, the robot's ankle transmission and IMU frame against the specific hardware configuration. The export uses joint-space targets with `physical_ankle_differential.enabled = false` and `hardware_qualified = false`. Upstream R1 hardware results apply to its own weights and runtime configuration. [Pinned OpenSprite runtime](https://github.com/BeijingDynamics/OpenSprite-SuperMimic/tree/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/runtime)
+The contract records the asset revision, control-profile fingerprint, joint names, gains, limits, startup handoff and ONNX fingerprint. For sim-to-real integration, verify joint-to-motor order, signs, zero offsets, the robot's ankle transmission and IMU frame against the specific hardware configuration. The export uses joint-space targets with `physical_ankle_differential.enabled = false` and `hardware_qualified = false`. Upstream R1 hardware results apply to its own weights and runtime configuration. [MacMimic hardware runtime](../../runtime)
 
 To compare the upstream runtime's history packing with this controller on simulated sensor data, run the command below from the repository root. It writes a fresh report in the package directory.
 

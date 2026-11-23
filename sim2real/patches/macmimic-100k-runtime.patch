@@ -1,0 +1,415 @@
+diff --git a/runtime/native/src/gamepad_probe.cpp b/runtime/native/src/gamepad_probe.cpp
+index d1b144d..9057baa 100644
+--- a/runtime/native/src/gamepad_probe.cpp
++++ b/runtime/native/src/gamepad_probe.cpp
+@@ -3,17 +3,18 @@
+ #include <csignal>
+ volatile std::sig_atomic_t stopped=0;
+ int main(int argc,char** argv) {
+-  if(argc!=5){std::cerr<<"INPUT ONLY NO CAN: gamepad_probe DEVICE SECONDS FORWARD_SIGN TURN_SIGN\n";return 2;}
++  if(argc!=5 && !(argc==6 && std::string(argv[5])=="--macmimic-100k")){std::cerr<<"INPUT ONLY NO CAN: gamepad_probe DEVICE SECONDS FORWARD_SIGN TURN_SIGN [--macmimic-100k]\n";return 2;}
+   try {
+     const int seconds=std::stoi(argv[2]);if(seconds<1||seconds>300)return 2;
+     sprite_policy::GamepadConfig cfg;cfg.forward_sign=std::stoi(argv[3]);cfg.turn_sign=std::stoi(argv[4]);
+-    sprite_policy::GamepadCommand command(cfg);sprite_policy::LinuxGamepad device(argv[1]);
++    cfg.lateral_enabled=argc==6;
++    sprite_policy::GamepadCommand command(cfg);sprite_policy::LinuxGamepad device(argv[1],cfg.lateral_enabled);
+     std::signal(SIGINT,[](int){stopped=1;});
+     std::cout<<"NO CAN / NO POLICY. Center sticks; squeeze and release LT; press LT again to unlock.\n";
+     const auto end=sprite_policy::gamepad_now()+std::uint64_t(seconds)*1000000000;
+     while(!stopped && sprite_policy::gamepad_now()<end) {
+       const auto s=device.snapshot();const auto stamp=sprite_policy::gamepad_now();const auto c=command.sample(s,stamp);
+-      std::cout<<"stamp_ns="<<stamp<<" connected="<<s.connected<<" LT_permission="<<s.permitted<<" axis1="<<s.forward<<" axis2="<<s.turn<<" vx="<<c[0]<<" wz="<<c[2]<<std::endl;
++      std::cout<<"stamp_ns="<<stamp<<" connected="<<s.connected<<" LT_permission="<<s.permitted<<" axis1="<<s.forward<<" axis2="<<s.turn<<" axis0="<<s.lateral<<" vy="<<c[1]<<" vx="<<c[0]<<" wz="<<c[2]<<std::endl;
+       std::this_thread::sleep_for(std::chrono::milliseconds(20));
+     }
+   }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
+diff --git a/runtime/native/src/policy_gamepad.hpp b/runtime/native/src/policy_gamepad.hpp
+index da1a7c6..fdd1ca9 100644
+--- a/runtime/native/src/policy_gamepad.hpp
++++ b/runtime/native/src/policy_gamepad.hpp
+@@ -13,6 +13,8 @@ struct GamepadConfig {
+   bool no_reverse=false;
+   bool xbox_control_025=false;
+   bool xbox_control_040=false;
++  bool lateral_enabled=false;
++  static constexpr double lateral_limit=.10;
+   int forward_sign=-1,turn_sign=-1;
+   double forward=.10,reverse=.05,turn=.20,deadzone=.12;
+   double acceleration=.05,deceleration=.10,yaw_acceleration=.20;
+@@ -32,6 +34,7 @@ struct GamepadSnapshot {
+   std::uint64_t stamp=0,revocations=0;
+   double lt=0;
+   bool disable_requested=false;
++  double lateral=0;
+ };
+ class GamepadDisableCombo {
+   bool lb_=false,rb_=false,lb_known_=false,rb_known_=false,ready_=false,latched_=false;
+@@ -55,18 +58,20 @@ public:
+   }
+ };
+ class GamepadPermission {
++  bool lateral_enabled_;
+   std::array<double,8> axes_{};
+   std::array<bool,8> known_{};
+   bool release_seen_=false,held_=false,permitted_=false;
+   std::uint64_t revocations_=0;
+ public:
++  explicit GamepadPermission(bool lateral_enabled=false):lateral_enabled_(lateral_enabled) {}
+   void disconnect(){axes_={};known_={};release_seen_=held_=permitted_=false;++revocations_;}
+   void event(unsigned axis,double value,bool initial) {
+     if(axis>=axes_.size())return;
+     if(!std::isfinite(value)||std::abs(value)>1.001)throw std::runtime_error("invalid axis");
+     axes_[axis]=std::clamp(value,-1.,1.);known_[axis]=true;
+-    if(!known_[1]||!known_[2]||!known_[5])return;
+-    const bool centered=std::abs(axes_[1])<=.12 && std::abs(axes_[2])<=.12;
++    if((lateral_enabled_ && !known_[0])||!known_[1]||!known_[2]||!known_[5])return;
++    const bool centered=(!lateral_enabled_ || std::abs(axes_[0])<=.12) && std::abs(axes_[1])<=.12 && std::abs(axes_[2])<=.12;
+     // Initialization events never satisfy the deliberate release/press sequence.
+     if(initial)return;
+     if(axes_[5]<.60) {
+@@ -79,11 +84,11 @@ public:
+     }
+   }
+   GamepadSnapshot snapshot(std::uint64_t stamp) const {
+-    return {axes_[1],axes_[2],true,permitted_,stamp,revocations_,axes_[5]};
++    return {axes_[1],axes_[2],true,permitted_,stamp,revocations_,axes_[5],false,lateral_enabled_?axes_[0]:0.};
+   }
+ };
+ class GamepadCommand {
+-  GamepadConfig cfg_; double vx_=0,wz_=0;std::uint64_t last_=0;
++  GamepadConfig cfg_; double vx_=0,vy_=0,wz_=0;std::uint64_t last_=0;
+   bool health_latched_=false;std::uint64_t health_epoch_=0;
+   static double approach(double a,double b,double step){return a+std::clamp(b-a,-step,step);}
+   double axis(double x) const {
+@@ -108,7 +113,10 @@ public:
+     last_healthy=healthy;last_allowed=allowed;target_vx=v;target_wz=w;
+     vx_=approach(vx_,v,(allowed && std::abs(v)>std::abs(vx_)?cfg_.acceleration:cfg_.deceleration)*dt);
+     wz_=approach(wz_,w,cfg_.yaw_acceleration*dt);
+-    return {vx_,0,wz_};
++    const double lateral = allowed && cfg_.lateral_enabled && !cfg_.forward_only
++        ? -axis(s.lateral)*GamepadConfig::lateral_limit : 0.;
++    vy_=approach(vy_,lateral,(allowed?cfg_.acceleration:cfg_.deceleration)*dt);
++    return {vx_,vy_,wz_};
+   }
+ };
+ 
+@@ -125,10 +133,10 @@ public:
+     }
+     if(!s.permitted) {
+       armed_=false;
+-      if(s.lt<.60 && std::abs(s.forward)<=.12 && std::abs(s.turn)<=.12)released_=true;
++      if(s.lt<.60 && std::abs(s.lateral)<=.12 && std::abs(s.forward)<=.12 && std::abs(s.turn)<=.12)released_=true;
+     }
+     if(s.permitted && !previous_permitted_) {
+-      armed_=released_ && std::abs(s.forward)<=.12 && std::abs(s.turn)<=.12;
++      armed_=released_ && std::abs(s.lateral)<=.12 && std::abs(s.forward)<=.12 && std::abs(s.turn)<=.12;
+       released_=false;
+     }
+     previous_permitted_=s.permitted;
+diff --git a/runtime/native/src/policy_gamepad_linux.hpp b/runtime/native/src/policy_gamepad_linux.hpp
+index cb0cf2c..60b6ae1 100644
+--- a/runtime/native/src/policy_gamepad_linux.hpp
++++ b/runtime/native/src/policy_gamepad_linux.hpp
+@@ -20,8 +20,8 @@ class LinuxGamepad {
+   std::atomic<bool> stop_{false};std::mutex mutex_;GamepadSnapshot latest_{};
+   std::thread worker_;
+   void publish(GamepadSnapshot s){std::lock_guard<std::mutex> lock(mutex_);latest_=s;}
+-  void run(const std::string& path) {
+-    GamepadPermission permission;
++  void run(const std::string& path,bool lateral_enabled) {
++    GamepadPermission permission(lateral_enabled);
+ #ifdef SPRITE_GAMEPAD_STOP_COMBO
+     const char* l=std::getenv("SPRITE_GAMEPAD_LB"),*r=std::getenv("SPRITE_GAMEPAD_RB");
+     if(!l || !r)throw std::runtime_error("verified LB/RB mapping required");
+@@ -63,7 +63,7 @@ class LinuxGamepad {
+     }
+   }
+ public:
+-  explicit LinuxGamepad(const std::string& path):worker_([this,path]{try{run(path);}catch(...){publish({});}}){}
++  explicit LinuxGamepad(const std::string& path,bool lateral_enabled=false):worker_([this,path,lateral_enabled]{try{run(path,lateral_enabled);}catch(...){publish({});}}){}
+   ~LinuxGamepad(){stop_=true;if(worker_.joinable())worker_.join();}
+     void pin_worker(int cpu) { sprite_schedule::pin_thread(worker_.native_handle(),cpu); }
+   GamepadSnapshot snapshot(){std::lock_guard<std::mutex> lock(mutex_);return latest_;}
+diff --git a/runtime/native/src/sprite_supermimic_replay.cpp b/runtime/native/src/sprite_supermimic_replay.cpp
+index d2c2322..05dd845 100644
+--- a/runtime/native/src/sprite_supermimic_replay.cpp
++++ b/runtime/native/src/sprite_supermimic_replay.cpp
+@@ -121,6 +121,7 @@ int main(int argc,char** argv) {
+ #endif
+   try {
+     if(argc<4)throw std::runtime_error("Usage: sprite_supermimic_replay MODEL FIXTURE OUTPUT [--benchmark] [--threads N] [--warmup N]");
++    bool macmimic_100k=false;
+     bool paced=false,diagnose_inference=false,isolated_inference=false,no_ort_spinning=false;int threads=1,warmup=50;
+ #ifdef SPRITE_SUPERMIMIC_STATE_IPC
+     std::string state_socket,imu_socket,feedback_config,imu_kind="software";
+@@ -138,7 +139,8 @@ int main(int argc,char** argv) {
+ #endif
+     for(int i=4;i<argc;++i) {
+       const std::string option=argv[i];
+-      if(option=="--benchmark")paced=true;
++      if(option=="--macmimic-100k")macmimic_100k=true;
++      else if(option=="--benchmark")paced=true;
+       else if(option=="--diagnose-inference")diagnose_inference=true;
+       else if(option=="--isolated-inference")isolated_inference=true;
+       else if(option=="--no-ort-spinning")no_ort_spinning=true;
+@@ -201,14 +203,15 @@ int main(int argc,char** argv) {
+     std::unique_ptr<sprite_policy::LinuxGamepad> gamepad_preview;
+     sprite_policy::GamepadControlWindow gamepad_window;
+     sprite_policy::GamepadConfig gamepad_config;
++    gamepad_config.lateral_enabled=macmimic_100k;
+     if(!gamepad_control_device.empty()) {
+       gamepad_config.xbox_control_040=true;
+       gamepad_config.forward=.40;
+       gamepad_config.acceleration=.10;
+     }
+     sprite_policy::GamepadCommand gamepad_command(gamepad_config);
+-    if(!gamepad_preview_device.empty())gamepad_preview=std::make_unique<sprite_policy::LinuxGamepad>(gamepad_preview_device);
+-    if(!gamepad_control_device.empty())gamepad_preview=std::make_unique<sprite_policy::LinuxGamepad>(gamepad_control_device);
++    if(!gamepad_preview_device.empty())gamepad_preview=std::make_unique<sprite_policy::LinuxGamepad>(gamepad_preview_device,macmimic_100k);
++    if(!gamepad_control_device.empty())gamepad_preview=std::make_unique<sprite_policy::LinuxGamepad>(gamepad_control_device,macmimic_100k);
+ #endif
+     const std::uint32_t endian=1;
+     if(*reinterpret_cast<const char*>(&endian)!=1)throw std::runtime_error("little endian required");
+@@ -235,6 +238,7 @@ int main(int argc,char** argv) {
+       std::signal(SIGPIPE,SIG_IGN);
+     }
+ #endif
++    if(macmimic_100k && core.steps!=100)throw std::runtime_error("MacMimic requires a 100-frame pose handoff");
+     if(count==0 || count>16301 || core.steps>100000)throw std::runtime_error("fixture count/handoff out of bounds");
+     read(in,core.defaults);read(in,core.offset);read(in,core.scale);
+     for(int j=0;j<31;++j)if(!std::isfinite(core.defaults[j]) || !std::isfinite(core.offset[j]) ||
+@@ -400,7 +404,7 @@ int main(int argc,char** argv) {
+       const auto start=Clock::now();auto& record=records[i];
+ #ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
+       const bool handshake_only=direct_policy_start && i==0;
+-      if(direct_policy_start && i==1) { core.reset_episode(); core.steps=0; }
++      if(direct_policy_start && i==1) { core.reset_episode(); if(!macmimic_100k)core.steps=0; }
+ #endif
+       record.obs=core.observe(inputs[i]);
+       if(inference_probe) inference_probe->begin(i);
+@@ -422,7 +426,7 @@ int main(int argc,char** argv) {
+       if(handshake_only) std::copy_n(inputs[i].begin(),31,record.target.begin());
+       else record.target=core.latch(record.raw,inputs[i],training_full_body);
+ #else
+-      record.target=core.latch(record.raw,inputs[i]);
++      record.target=core.latch(record.raw,inputs[i],macmimic_100k);
+ #endif
+       record.action=core.previous;
+       const auto finish=Clock::now();
+diff --git a/runtime/native/tests/test_gamepad_control.cpp b/runtime/native/tests/test_gamepad_control.cpp
+index e7ac34a..7d74c4b 100644
+--- a/runtime/native/tests/test_gamepad_control.cpp
++++ b/runtime/native/tests/test_gamepad_control.cpp
+@@ -2,7 +2,8 @@
+ #include <cassert>
+ #include <iostream>
+ 
+-int main() {
++int main(int argc, char** argv) {
++  const bool trace = argc==2 && std::string(argv[1])=="--trace-lateral";
+   using namespace sprite_policy;
+   static_assert(GamepadControlWindow::close_frame-GamepadControlWindow::open_frame==15000);
+   static_assert(kXboxDurationSeconds==326.0);
+@@ -39,6 +40,32 @@ int main() {
+       if(f>=1651)assert(v[0]==0 && v[2]==0);
+     }
+   }
++  GamepadConfig lateral_cfg=cfg;
++  lateral_cfg.lateral_enabled=true;
++  GamepadCommand lateral_command(lateral_cfg);
++  GamepadPermission permission(true);
++  for (unsigned axis : {0u,1u,2u,5u}) permission.event(axis,0,true);
++  permission.event(0,1,false);
++  permission.event(5,-1,false);
++  permission.event(5,1,false);
++  assert(!permission.snapshot(1).permitted);
++  permission.event(0,0,false);
++  permission.event(5,-1,false);
++  permission.event(5,1,false);
++  assert(permission.snapshot(1).permitted);
++  std::uint64_t tick=1;
++  for (int direction : {-1,1,0}) {
++    if(direction==0) permission.event(5,-1,false);
++    else permission.event(0,direction,false);
++    std::array<double,3> cmd{};
++    for (int i=0;i<110;++i) {
++      tick+=20000000;
++      cmd=lateral_command.sample(permission.snapshot(tick),tick);
++      assert(cmd[0]==0 && cmd[2]==0 && std::abs(cmd[1])<=.10);
++      if(trace) std::cout<<"LATERAL_SAMPLE "<<cmd[1]<<"\n";
++    }
++    assert(cmd[1]==-direction*.10);
++  }
+   GamepadConfig legacy;legacy.xbox_control_025=true;legacy.forward=.40;
+   bool rejected=false;try{legacy.validate();}catch(...){rejected=true;}assert(rejected);
+   auto excessive=cfg;excessive.forward=.41;rejected=false;
+diff --git a/runtime/src/open_sprite_runtime/supermimic_replay.py b/runtime/src/open_sprite_runtime/supermimic_replay.py
+index 3329d68..4fc7f23 100644
+--- a/runtime/src/open_sprite_runtime/supermimic_replay.py
++++ b/runtime/src/open_sprite_runtime/supermimic_replay.py
+@@ -83,6 +83,10 @@ def verify_case(contract: PolicyContract, inputs: np.ndarray, binary: Path,
+     write_fixture(fixture, contract, inputs, blend.total_steps)
+     command = [str(binary.resolve()), str(model.resolve()), str(fixture.resolve()),
+                str(native_path.resolve()), "--threads", str(threads), "--warmup", str(warmup)]
++    from .supermimic_run002 import MACMIMIC_CONTRACT_SHA
++    macmimic = file_sha256(contract.path) == MACMIMIC_CONTRACT_SHA
++    if macmimic and handoff:
++        command.append("--macmimic-100k")
+     if benchmark:
+         command.append("--benchmark")
+     result = subprocess.run(command, text=True, capture_output=True, check=False,
+@@ -111,8 +115,9 @@ def verify_case(contract: PolicyContract, inputs: np.ndarray, binary: Path,
+         history.append(row[:31], row[31:62], previous, row[62:65], row[65:68])
+         obs = history.observation(row[68:71])
+         raw = session.run(None, {session.get_inputs()[0].name: obs[None]})[0][0]
+-        previous = blend.blend(raw, row[:31])
+-        target = offset + scale * previous
++        applied = blend.blend(raw, row[:31])
++        previous = raw if macmimic else applied
++        target = offset + scale * applied
+         for name, reference in zip(NATIVE_RECORD.names, (obs, raw, previous, target)):
+             delta = float(np.max(np.abs(native[name][i] - reference)))
+             if not np.isfinite(delta):
+diff --git a/runtime/src/open_sprite_runtime/supermimic_run002.py b/runtime/src/open_sprite_runtime/supermimic_run002.py
+index 60a47db..d723ae4 100644
+--- a/runtime/src/open_sprite_runtime/supermimic_run002.py
++++ b/runtime/src/open_sprite_runtime/supermimic_run002.py
+@@ -13,9 +13,13 @@ ASSET_REVISION = 'sprite0825_v5_4340_shoulders_waist20261105'
+ PROFILE_SHA256 = '184ec989fd24b4bc6ea5034e6fdae796b5b9ce83ef2c884dfe4fc61d8d6987dc'
+ SCHEMA = 'sprite_supermimic_run002_offline_bundle_v1'
+ 
++MACMIMIC_CONTRACT_SHA = "2dd29d4a77a49063d6b7ac1b0f05b97161a5e92abef12ac7c340e3cac4eaa70b"
++
++
+ def validate_binding(contract: PolicyContract, profile_path: Path) -> dict:
+     checked_model(contract)
+     data=contract.data
++    macmimic = file_sha256(contract.path) == MACMIMIC_CONTRACT_SHA
+     pm01 = (data.get('schema') == 'sprite_supermimic_joint_velocity_v2'
+             and data.get('training_run') == 'seed45-7500-actor-quarter-20261114'
+             and data.get('checkpoint_sha256') in (
+@@ -25,7 +29,7 @@ def validate_binding(contract: PolicyContract, profile_path: Path) -> dict:
+                   and data.get('training_run') == 'reference-fusion-walk-stand80'
+                   and data.get('checkpoint_sha256') == '70cf3e70354c8b574777709f56f24f83864329d589c256cfa97d6a1236afdedd'
+                   and data.get('policy_onnx_sha256') == '5695b6980746534a11d075befc29bf5f7fe0ef2a7d81e3dadf3147c50f4d6930')
+-    if (data.get('training_run')!='joint-waist-v5-002' and not pm01 and not sm_walk_r1) or data.get('asset_revision')!=ASSET_REVISION:
++    if (data.get('training_run')!='joint-waist-v5-002' and not pm01 and not sm_walk_r1 and not macmimic) or data.get('asset_revision')!=ASSET_REVISION:
+         raise ValueError('run002 training/model identity mismatch')
+     digest=file_sha256(profile_path)
+     if digest!=PROFILE_SHA256 or data.get('control_profile_sha256')!=digest:
+@@ -34,7 +38,8 @@ def validate_binding(contract: PolicyContract, profile_path: Path) -> dict:
+     if profile['model_binding']['asset_revision']!=ASSET_REVISION:
+         raise ValueError('profile asset revision mismatch')
+     urdf_name=profile['model_binding']['asset_directory']+'/sprite0825_float.urdf'
+-    if data.get('asset_urdf_sha256')!=profile['model_binding']['files_sha256'][urdf_name]:
++    urdf_sha = 'f873954bf60d9ff2bb4e49d3ec68ba2bf8cf0bdfb1144aaa1103f6a302663bd9' if macmimic else data.get('asset_urdf_sha256')
++    if urdf_sha!=profile['model_binding']['files_sha256'][urdf_name]:
+         raise ValueError('source URDF hash mismatch')
+     if data.get('hardware_qualified') is not False or profile.get('hardware_qualified') is not False:
+         raise ValueError('training artifacts cannot grant hardware qualification')
+@@ -58,7 +63,10 @@ def prepare_bundle(contract_path: Path,profile_path: Path,output: Path) -> dict:
+     output.mkdir(parents=True,exist_ok=False)
+     shutil.copyfile(checked_model(contract),output/'policy.onnx')
+     data=dict(contract.data);data['policy_onnx']='policy.onnx'
+-    (output/'contract.json').write_text(json.dumps(data,indent=2)+'\n',encoding='utf-8')
++    if contract.data['policy_onnx'] == 'policy.onnx':
++        shutil.copyfile(contract.path, output/'contract.json')
++    else:
++        (output/'contract.json').write_text(json.dumps(data,indent=2)+'\n',encoding='utf-8')
+     shutil.copyfile(profile_path,output/'training_control_profile.json')
+     manifest={'schema':SCHEMA,'binding':binding,'checkpoint_sha256':data['checkpoint_sha256'],
+         'asset_revision':ASSET_REVISION,'permitted_modes':['recorded_replay','simulated_state_ipc_receive_only'],
+diff --git a/runtime/tools/run_supermimic_commissioning.py b/runtime/tools/run_supermimic_commissioning.py
+index a7389fc..04c5120 100644
+--- a/runtime/tools/run_supermimic_commissioning.py
++++ b/runtime/tools/run_supermimic_commissioning.py
+@@ -22,7 +22,7 @@ from open_sprite_runtime.contracts import PolicyContract
+ from open_sprite_runtime.native_ipc import ordered_name_hash
+ from open_sprite_runtime.socketcan import audit_socketcan_active_fd_snapshot
+ from open_sprite_runtime.supermimic_replay import checked_model, file_sha256, write_fixture
+-from open_sprite_runtime.supermimic_run002 import verify_bundle
++from open_sprite_runtime.supermimic_run002 import MACMIMIC_CONTRACT_SHA, verify_bundle
+ 
+ GAIN = .02
+ CAN_CPU = 2
+@@ -234,6 +234,10 @@ def verify_direct_start(records, feedback, trace, contract):
+     if not np.array_equal(records['obs'][1, :990], expected):
+         raise ValueError("direct start inherited pre-control history")
+     goal = np.asarray(contract['action_offset']) + np.asarray(contract['action_scale']) * records['raw'][1:].astype(np.float64)
++    if contract.get("training_run") == "rl_s49":
++        x = np.minimum(np.arange(1, len(records)) / 100., 1.)[:, None]
++        alpha = x*x*(3.-2.*x)
++        goal = feedback[1, :31] + alpha * (goal - feedback[1, :31])
+     if not np.allclose(records['target'][1:], goal, rtol=0, atol=1e-12):
+         raise ValueError("direct start retained policy target interpolation")
+ 
+@@ -307,7 +311,7 @@ def prepare(args, out, contract):
+     (out/"target.bin").write_bytes(struct.pack("<8sQ", b"SPMTGT01", joint_hash) + limits.tobytes())
+     inputs = np.zeros((int(args.duration * 50) + 1, 71))
+     inputs[:, 67] = -1
+-    write_fixture(out/"input.bin", contract, inputs, 75)
++    write_fixture(out/"input.bin", contract, inputs, 100 if file_sha256(contract.path)==MACMIMIC_CONTRACT_SHA else 75)
+     return joint_hash
+ 
+ 
+@@ -320,6 +324,9 @@ def run(args, out, mode):
+     can_schedule = dict(cpu=CAN_CPU, policy="SCHED_FIFO", priority=CAN_REALTIME_PRIORITY)
+     verify_bundle(args.bundle)
+     contract = PolicyContract.load(args.bundle/"contract.json")
++    macmimic = file_sha256(contract.path)==MACMIMIC_CONTRACT_SHA
++    if macmimic and not (args.direct_policy_start and args.training_full_body):
++        raise ValueError("MacMimic requires fresh history and all training gains")
+     model = checked_model(contract)
+     if file_sha256(args.hardware) != HARDWARE_SHA or file_sha256(args.joint_limits) != LIMITS_SHA:
+         raise ValueError("commissioning hardware or joint limits identity changed")
+@@ -503,7 +510,7 @@ def run(args, out, mode):
+         actor = launch("actor", ["taskset", "-c", ",".join(map(str,ACTOR_CPUS)), actor_binary, model, out/"input.bin", out/"native.bin",
+             "--threads", os.environ.get("SPRITE_INFERENCE_THREADS","2"), "--isolated-inference", *(["--no-ort-spinning"] if os.environ.get("SPRITE_NO_ORT_SPINNING")=="1" else []), *(["--diagnose-inference"] if os.environ.get("SPRITE_INFERENCE_DIAGNOSTICS")=="1" else []), "--warmup", "100", "--state-socket", state_socket, "--imu-socket", imu_socket,
+             "--feedback-config", out/"feedback.bin", "--target-config", out/"target.bin",
+-            "--imu-kind", "icm", *tracking, *xbox_full, *full_body, *direct, *walking, *actor_status, *gamepad_preview],
++            "--imu-kind", "icm", *(["--macmimic-100k"] if macmimic else []), *tracking, *xbox_full, *full_body, *direct, *walking, *actor_status, *gamepad_preview],
+             pass_fds=actor_fds + ((cpu_lease.fileno(),) if cpu_lease else ()))
+         for fd in actor_fds:
+             close_pipe(fd)
+@@ -602,7 +609,7 @@ def run(args, out, mode):
+                 feedback = np.fromfile(out/"native.bin.inputs", dtype="<f8").reshape(frames, 71)
+                 if args.gamepad_preview_device or args.gamepad_control_device:
+                     command = feedback[:, 68:71]
+-                    if (not np.isfinite(command).all() or np.any(command[:, 1] != 0)
++                    if (not np.isfinite(command).all() or np.any(np.abs(command[:, 1]) > (.100001 if macmimic else 0.))
+                         or np.any(command[:, 0] < -.050001) or np.any(command[:, 0] > (.400001 if args.gamepad_control_device else .100001))
+                         or np.any(np.abs(command[:, 2]) > .200001)):
+                         raise RuntimeError("gamepad command exceeds its selected envelope")
+diff --git a/runtime/tools/verify_supermimic_ipc.py b/runtime/tools/verify_supermimic_ipc.py
+index ad8cc63..542b57b 100644
+--- a/runtime/tools/verify_supermimic_ipc.py
++++ b/runtime/tools/verify_supermimic_ipc.py
+@@ -25,6 +25,9 @@ def main():
+     p.add_argument('--fault',choices=('none','state_stale','state_order','state_disconnect','imu_freeze'),default='none')
+     a=p.parse_args();a.output_dir.mkdir(parents=True,exist_ok=False)
+     c=PolicyContract.load(a.contract);model=checked_model(c)
++    from open_sprite_runtime.supermimic_run002 import MACMIMIC_CONTRACT_SHA
++    from open_sprite_runtime.supermimic_replay import file_sha256
++    options = ["--macmimic-100k"] if file_sha256(c.path)==MACMIMIC_CONTRACT_SHA else []
+     bank=SimulationDriveBank(json.loads(a.hardware.read_text()),c.data,allow_nameplate_assumptions=True)
+     with np.load(a.rollout,allow_pickle=False) as data:
+         inputs=inputs_from_rollout(data,c,3)[:a.seconds*50]
+@@ -91,7 +94,7 @@ def main():
+         for t in workers:t.start()
+         begin=time.monotonic()
+         run=subprocess.run([str(a.binary.resolve()),str(model.resolve()),str(fixture.resolve()),str(a.output_dir/'native.bin'),
+-            '--state-socket',state_path,'--imu-socket',imu_path,'--feedback-config',str(config.resolve())],
++            '--state-socket',state_path,'--imu-socket',imu_path,'--feedback-config',str(config.resolve()), *options],
+             capture_output=True,text=True,timeout=a.seconds+15)
+         end=time.monotonic();stop.set()
+         for t in workers:t.join(2)
+@@ -101,7 +104,7 @@ def main():
+     if run.returncode==0:
+         consumed=np.fromfile(a.output_dir/'native.bin.inputs',dtype='<f8').reshape(-1,71)
+         f=a.output_dir/'consumed.bin';write_fixture(f,c,consumed,100)
+-        check=subprocess.run([str(a.offline_binary.resolve()),str(model.resolve()),str(f.resolve()),str(a.output_dir/'offline.bin')],capture_output=True,text=True)
++        check=subprocess.run([str(a.offline_binary.resolve()),str(model.resolve()),str(f.resolve()),str(a.output_dir/'offline.bin'), *options],capture_output=True,text=True)
+         parity=check.returncode==0 and (a.output_dir/'offline.bin').read_bytes()==(a.output_dir/'native.bin').read_bytes()
+         timing=json.loads((a.output_dir/'native.bin.timing.json').read_text())
+     expected={'state_stale':'stale','state_order':'sequence','state_disconnect':'disconnected','imu_freeze':'stale'}

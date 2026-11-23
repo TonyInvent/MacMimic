@@ -1,0 +1,23 @@
+{
+  "run": "disabled-20261123-141116",
+  "duration_s": 326.0,
+  "passed": true,
+  "groups": 16300,
+  "motor_dispatches": 505300,
+  "worst_sequence": 724,
+  "oldest_feedback_to_hardware_receipt_upper_max_ms": 12.877254,
+  "groups_at_or_above_20ms": 0,
+  "timing_max_ms": {
+    "can_feedback": 5.898056,
+    "state_ipc": 1.034082,
+    "actor_preprocess": 0.148505,
+    "inference": 5.121408,
+    "actor_postprocess": 0.014302,
+    "target_ipc": 0.545995,
+    "total": 11.820395
+  },
+  "enable_attempts": 0,
+  "final_disabled": 31,
+  "powered_walking_ready": false,
+  "kcan_srcversion": "404E8D65A6EFF60079EAEC1"
+}

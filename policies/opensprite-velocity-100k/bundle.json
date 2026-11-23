@@ -1,0 +1,29 @@
+{
+  "schema": "sprite_supermimic_run002_offline_bundle_v1",
+  "binding": {
+    "profile_sha256": "184ec989fd24b4bc6ea5034e6fdae796b5b9ce83ef2c884dfe4fc61d8d6987dc",
+    "source_published_pd_hz": 200,
+    "effective_training_pd_hz": 500,
+    "policy_hz": 50,
+    "history_frames": 10,
+    "observation_size": 993,
+    "action_size": 31,
+    "hardware_qualified": false,
+    "hardware_tx": 0
+  },
+  "checkpoint_sha256": "a64757580793e896b3245a7b2fbfe9ad078148dd8777fb8b6e9283b7ddedaf16",
+  "asset_revision": "sprite0825_v5_4340_shoulders_waist20261105",
+  "permitted_modes": [
+    "recorded_replay",
+    "simulated_state_ipc_receive_only"
+  ],
+  "hardware_qualified": false,
+  "allow_hardware_tx": false,
+  "motor_enable_supported": false,
+  "jetson_latency_qualified": false,
+  "files_sha256": {
+    "policy.onnx": "2ab5220171e9119028194ce6f0e0700beecfa87deb1af0d8b882340a3ae2de34",
+    "contract.json": "2dd29d4a77a49063d6b7ac1b0f05b97161a5e92abef12ac7c340e3cac4eaa70b",
+    "training_control_profile.json": "184ec989fd24b4bc6ea5034e6fdae796b5b9ce83ef2c884dfe4fc61d8d6987dc"
+  }
+}

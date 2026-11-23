@@ -1,0 +1,242 @@
+--- a/native/src/sling_window.hpp
++++ b/native/src/sling_window.hpp
+@@ -10,13 +10,13 @@
+ // Leave half a second for delivery of the local operator notification.
+ constexpr double kSlingDurationSeconds = kSlingStandSeconds + kSlingCountdownSeconds + 0.5;
+ constexpr std::uint64_t kXboxControlOpenFrame = 1002;
+-constexpr std::uint64_t kXboxControlFrames = 300 * 50;
++constexpr std::uint64_t kXboxControlFrames = 30 * 50;
+ constexpr std::uint64_t kXboxControlCloseFrame = kXboxControlOpenFrame + kXboxControlFrames;
+ // Full command window plus 4 s maximum braking and a final quiet interval.
+-constexpr double kXboxDurationSeconds = 326.0;
++constexpr double kXboxDurationSeconds = 56.0;
+ // Round window close upward, then allow the full maximum braking time.
+ constexpr int kXboxEndNoticeSeconds = (kXboxControlCloseFrame + 49) / 50 + 4;
+-static_assert(kXboxEndNoticeSeconds == 325);
++static_assert(kXboxEndNoticeSeconds == 55);
+ constexpr std::uint64_t kSlingReadySequence = kSlingStandSeconds * 50;
+ constexpr std::uint64_t kSlingStableFrames = 50;
+ constexpr int kWalkStartSeconds = kSlingStandSeconds + kSlingCountdownSeconds;
+--- a/native/src/sprite_supermimic_replay.cpp
++++ b/native/src/sprite_supermimic_replay.cpp
+@@ -312,6 +312,22 @@
+       if(gamepad_preview)++io_threads;
+ #endif
+       sprite_schedule::verify_and_save(argv[3],ort_worker_tid,io_threads);
++#ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
++      if (macmimic_100k && !gamepad_control_device.empty()) {
++        if (!ort_worker_tid || !no_ort_spinning)
++          throw std::runtime_error("Xbox compute scheduling requires two non-spinning inference threads");
++        sched_param compute{};
++        compute.sched_priority = 1;
++        for (int tid : {static_cast<int>(getpid()), ort_worker_tid}) {
++          sched_param actual{};
++          if (sched_setscheduler(tid, SCHED_RR, &compute) != 0 ||
++              sched_getscheduler(tid) != SCHED_RR || sched_getparam(tid, &actual) != 0 ||
++              actual.sched_priority != compute.sched_priority)
++            throw std::runtime_error("Inference compute scheduling verification failed");
++        }
++        std::cout << "Verified SCHED_RR 1 on both inference threads." << std::endl;
++      }
++#endif
+       std::cout<<"Inference affinity verified; exact thread placement is recorded in the affinity report."<<std::endl;
+     }
+     sprite_policy::ImuSnapshot sample;const auto wait_start=Clock::now();
+@@ -395,7 +411,7 @@
+         std::copy(command.begin(),command.end(),inputs[i].begin()+68);
+         if(i==1 && gamepad_control_device.empty())std::cout<<"GAMEPAD_PREVIEW_READY: motors disabled by preview launcher; center sticks, press/release LT, then hold LT to test commands."<<std::endl;
+         if(!gamepad_control_device.empty() && i==sprite_policy::GamepadControlWindow::open_frame)
+-          std::cout<<"XBOX_WINDOW_OPEN: 300 seconds of control. Center sticks, release LT, then hold LT to command motion. Retain fall protection."<<std::endl;
++          std::cout<<"XBOX_WINDOW_OPEN: 30 seconds of control. Center sticks, release LT, then hold LT to command motion. Retain fall protection."<<std::endl;
+         if(!gamepad_control_device.empty() && i==sprite_policy::GamepadControlWindow::close_frame)
+           std::cout<<"XBOX_WINDOW_CLOSED: commands decelerate to zero; automatic disable follows."<<std::endl;
+       }
+--- a/native/src/sprite_can_shadow.cpp
++++ b/native/src/sprite_can_shadow.cpp
+@@ -598,9 +598,8 @@
+   if (result.config.empty() || result.output.empty()) {
+     throw std::runtime_error("--config and --output are required");
+   }
+-  const bool xbox_long_duration = result.xbox_body_admission && result.duration_s == sprite_policy::kXboxDurationSeconds;
+-  if (!(result.duration_s > 0.0 && (result.duration_s <= 120.0 || xbox_long_duration))) {
+-    throw std::runtime_error("duration must be in (0, 120], except the exact 326-second Xbox profile");
++  if (!(result.duration_s > 0.0 && result.duration_s <= 120.0)) {
++    throw std::runtime_error("duration must be in (0, 120]");
+   }
+   if (result.measured_pose_hold && result.policy_actuation) {
+     throw std::runtime_error("measured-pose hold and policy actuation are mutually exclusive");
+@@ -640,7 +639,7 @@
+     throw std::runtime_error("SuperMimic commissioning requires strict IPC and a bounded duration");
+   }
+   const std::string required_ack = result.xbox_body_admission
+-      ? (result.policy_actuation ? "ENABLE_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE" : "PREVIEW_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE")
++      ? (result.policy_actuation ? "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_30S_040" : "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_30S_040")
+       : walking
+       ? std::string(result.policy_actuation ? "ENABLE_SUPERMIMIC_WALK_" : "PREVIEW_SUPERMIMIC_WALK_") +
+           (result.walk_speed == .20 ? "020_10S" : result.walk_speed == .25 ? "025_10S" : "030_10S")
+@@ -1905,7 +1904,6 @@
+   const bool sling = options.sling_ready_fd >= 0;
+   const bool walking = options.walk_speed > 0.0;
+   // Only the explicitly acknowledged extended Xbox profile observes instantaneous torque.
+-  for (auto& motor : motors) motor.feedback_torque_observe_only = strict && options.xbox_body_admission;
+   bool sling_window_opened = false;
+   bool sling_blend_started = false;
+   std::int64_t sling_notice_ns = 0;
+--- a/native/tests/test_bounded_preview.cpp
++++ b/native/tests/test_bounded_preview.cpp
+@@ -246,17 +246,17 @@
+           !accepts_duration("11", ten_ack), "ten-second token must not admit a different tier");
+   require(!accepts_duration("10", ten_ack, "0"), "powered SuperMimic requires verified real-time scheduling");
+   constexpr auto sling_ack = "ENABLE_SUPERMIMIC_ZERO_SPD_SLING_WINDOW";
+-  for (const char* invalid : {"54", "120", "146", "300", "325", "327", "600"})
+-    require(!accepts_duration(invalid, "ENABLE_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE", "50", true, nullptr, true),
+-            "Xbox extension requires the exact 326-second profile");
+-  require(!accepts_duration("326", "ENABLE_SUPERMIMIC_XBOX_30S", "50", true, nullptr, true),
++  for (const char* invalid : {"54", "120", "146", "300", "55", "57", "326", "600"})
++    require(!accepts_duration(invalid, "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_30S_040", "50", true, nullptr, true),
++            "Xbox extension requires the exact 56-second profile");
++  require(!accepts_duration("56", "ENABLE_SUPERMIMIC_XBOX_30S", "50", true, nullptr, true),
+           "old acknowledgement must not admit the extended profile");
+ 
+-  require(accepts_duration("326", "ENABLE_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE", "50", true, nullptr, true) &&
+-          !accepts_duration("326", "ENABLE_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE", "50", false, nullptr, true) &&
+-          !accepts_duration("30.5", "ENABLE_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE", "50", true, nullptr, true) &&
+-          !accepts_duration("326", sling_ack, "50", true, nullptr, true) &&
+-          !accepts_duration("326", "ENABLE_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE", "50", true, nullptr, false) &&
++  require(accepts_duration("56", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_30S_040", "50", true, nullptr, true) &&
++          !accepts_duration("56", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_30S_040", "50", false, nullptr, true) &&
++          !accepts_duration("30.5", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_30S_040", "50", true, nullptr, true) &&
++          !accepts_duration("56", sling_ack, "50", true, nullptr, true) &&
++          !accepts_duration("56", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_30S_040", "50", true, nullptr, false) &&
+           !accepts_duration("49.5", "ENABLE_SUPERMIMIC_WALK_025_10S", "50", true, "--walk-025", true),
+           "Xbox body admission is isolated to direct coherent sling commissioning");
+   require(accepts_duration("30.5", sling_ack, "50", true) &&
+--- a/native/tests/test_gamepad_control.cpp
++++ b/native/tests/test_gamepad_control.cpp
+@@ -5,13 +5,13 @@
+ int main(int argc, char** argv) {
+   const bool trace = argc==2 && std::string(argv[1])=="--trace-lateral";
+   using namespace sprite_policy;
+-  static_assert(GamepadControlWindow::close_frame-GamepadControlWindow::open_frame==15000);
+-  static_assert(kXboxDurationSeconds==326.0);
++  static_assert(GamepadControlWindow::close_frame-GamepadControlWindow::open_frame==1500);
++  static_assert(kXboxDurationSeconds==56.0);
+   GamepadConfig cfg;cfg.xbox_control_040=true;cfg.forward=.40;cfg.acceleration=.10;
+   GamepadCommand command(cfg);GamepadControlWindow window;
+   GamepadSnapshot s{};s.connected=true;s.permitted=true;s.lt=1;
+   std::size_t allowed_frames=0;bool cap=false;
+-  for(std::uint64_t frame=0;frame<16301;++frame) {
++  for(std::uint64_t frame=0;frame<2801;++frame) {
+     auto now=(frame+1)*20000000ULL;s.stamp=now;
+     s.forward=frame<1004?-1:0;
+     if(frame==1004){s.permitted=false;s.lt=-1;}
+@@ -23,10 +23,10 @@
+     assert(v[0]>=0 && v[0]<=.40 && v[1]==0 && std::abs(v[2])<=.20);
+     if(v[0]==.40)cap=true;
+     if(frame==1205)assert(v[0]==.40);
+-    if(frame==16001)assert(v[0]==.40 && v[2]==.20);
+-    if(frame>=16203)assert(v[0]==0 && v[2]==0);
++    if(frame==2501)assert(v[0]==.40 && v[2]==.20);
++    if(frame>=2703)assert(v[0]==0 && v[2]==0);
+   }
+-  assert(cap && allowed_frames==14997);
++  assert(cap && allowed_frames==1497);
+   for(bool disconnect : {false,true}) {
+     GamepadCommand c(cfg);GamepadControlWindow w;GamepadSnapshot p{};
+     p.connected=true;p.lt=-1;
+@@ -76,5 +76,5 @@
+   try{excessive.validate();}catch(...){rejected=true;}assert(rejected);
+   GamepadControlWindow stale;s={};s.connected=true;s.lt=-1;s.stamp=1;
+   assert(!stale.allowed(1002,s,200000000));
+-  std::cout<<"PASS 300-second window, 0.40 cap, fresh trigger, 4-second braking, disconnect, legacy caps\n";
++  std::cout<<"PASS 30-second window, 0.40 cap, fresh trigger, 4-second braking, disconnect, legacy caps\n";
+ }
+--- a/tools/run_supermimic_commissioning.py
++++ b/tools/run_supermimic_commissioning.py
+@@ -29,7 +29,7 @@
+ CAN_REALTIME_PRIORITY = 50
+ ACTOR_CPUS = (4, 5)
+ SLING_DURATION = 30.5
+-XBOX_DURATION = 326.0
++XBOX_DURATION = 56.0
+ WALK_DURATION = 49.5
+ SLING_COUNTDOWN = [f"COUNTDOWN_{seconds}" for seconds in range(9, 0, -1)]
+ INTERNAL_OPERATOR_EVENTS = {"ENABLED_31", "DRY_ENABLE_NOTICE"}
+@@ -53,8 +53,8 @@
+     "DISABLE_UNCONFIRMED": "Could not confirm all 31 motors disabled. CUT MOTOR POWER.",
+ }
+ OPERATOR_MESSAGES.update({
+-    "XBOX_READY": "Body stability check passed. Slacken the sling only if self-supported; retain fall protection. The 300-second Xbox window opens next.",
+-    "DRY_XBOX_READY": "Disabled validation: 300-second Xbox window opens next. Keep sling support.",
++    "XBOX_READY": "Body stability check passed. Slacken the sling only if self-supported; retain fall protection. The 30-second Xbox window opens next.",
++    "DRY_XBOX_READY": "Disabled validation: 30-second Xbox window opens next. Keep sling support.",
+     "XBOX_END": "Xbox commands have returned to zero. Control is ending; retain fall protection.",
+ })
+ OPERATOR_MESSAGES.update({
+@@ -448,7 +448,7 @@
+             actor_status = ["--sling-ready-fd", ready_write]
+             can_fds, actor_fds = (ready_read, status_write), (ready_write,)
+         imu = launch("imu", ["taskset", "-c", "3", args.icm, "capture", "/dev/spidev0.0", "/dev/gpiochip0",
+-            "123", "800", "360" if args.gamepad_control_device else "85" if args.walk_speed else "60" if args.sling_window else "35",
++            "123", "800", "85" if args.gamepad_control_device else "85" if args.walk_speed else "60" if args.sling_window else "35",
+             out/"imu.csv", "X_DOWN_Z_BACK", "CONFIGURE_ICM45686_RAW_NO_CAN"],
+             env=dict(os.environ, ICM_IPC_SOCKET=str(imu_socket)))
+         wait = time.monotonic()+25
+@@ -482,7 +482,7 @@
+             action = "ENABLE" if mode == "powered" else "PREVIEW"
+             ack = f"{action}_SUPERMIMIC_WALK_{walk_code}_10S"
+         if args.gamepad_control_device:
+-            ack = "ENABLE_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE" if mode == "powered" else "PREVIEW_SUPERMIMIC_XBOX_300S_040_FAST_TORQUE_OBSERVE"
++            ack = "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_30S_040" if mode == "powered" else "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_30S_040"
+         can = launch("can", [can_binary, "--supermimic-commissioning", *options, *tracking, *direct, *coherent, *walking, *can_status,
+             "--acknowledge-hardware-tx", ack, "--all-motors-disabled-confirmed", "--config", out/"motors.tsv",
+             "--kinematics-config", out/"kinematics.tsv", "--joint-safety-config", out/"joints.tsv",
+@@ -535,7 +535,7 @@
+                     time.sleep(.05)
+             threading.Thread(target=announce_xbox_window, daemon=True).start()
+         if mode == "deadline_fault":
+-            inject_at = time.monotonic() + (315.5 if args.gamepad_control_device else 36.5 if args.walk_speed else 6.5 if args.duration >= 10 else 1.25)
++            inject_at = time.monotonic() + (45.5 if args.gamepad_control_device else 36.5 if args.walk_speed else 6.5 if args.duration >= 10 else 1.25)
+             while time.monotonic() < inject_at:
+                 if cpu_lease: cpu_lease.check()
+                 time.sleep(min(.05,max(0.,inject_at-time.monotonic())))
+@@ -573,7 +573,7 @@
+             if tx_audit.returncode:
+                 raise RuntimeError('per-action motor TX audit failed; see action-tx-audit.log')
+         if mode == "deadline_fault":
+-            minimum_targets = 15700 if args.gamepad_control_device else 1652 if args.walk_speed else 251 if args.duration >= 10 else 2
++            minimum_targets = 2200 if args.gamepad_control_device else 1652 if args.walk_speed else 251 if args.duration >= 10 else 2
+             if (can_code != 2 or report["passed"] or report["policy_target_count"] < minimum_targets or not actor_code or
+                 report.get("deadline_stage") != "target_ipc_pending" or
+                 not any("oldest-feedback 20 ms deadline exceeded" in error for error in report["errors"])):
+@@ -613,7 +613,7 @@
+                         or np.any(command[:, 0] < -.050001) or np.any(command[:, 0] > (.400001 if args.gamepad_control_device else .100001))
+                         or np.any(np.abs(command[:, 2]) > .200001)):
+                         raise RuntimeError("gamepad command exceeds its selected envelope")
+-                    if args.gamepad_control_device and (np.any(command[:1002] != 0) or np.any(command[16205:] != 0)):
++                    if args.gamepad_control_device and (np.any(command[:1002] != 0) or np.any(command[2705:] != 0)):
+                         raise RuntimeError("Xbox commands escaped the bounded control window")
+                 if args.walk_speed:
+                     verify_walk_commands(feedback[:, 68:], args.walk_speed)
+@@ -736,7 +736,7 @@
+     evidence = dict(mode=mode, passed=bool(passed), failure=failure, duration_s=args.duration,
+                     gain_scale=1. if args.training_full_body else GAIN, xbox_leg_waist_gain_scale=leg_waist_gain_scale,
+                     training_full_body=args.training_full_body, standing_admission=standing_admission,
+-                    feedback_torque_mode="observe_only" if args.gamepad_control_device else "stop",
++                    feedback_torque_mode="stop",
+                     xbox_forward_acceleration_m_s2=.10 if args.gamepad_control_device else None,
+                     direct_policy_start=args.direct_policy_start,
+                     coherent_action_send=args.coherent_action_send,
+--- a/native/src/sprite_can_shadow.cpp
++++ b/native/src/sprite_can_shadow.cpp
+@@ -706,8 +706,8 @@
+       throw std::runtime_error(
+           "protected policy actuation over 40 seconds requires the exact 60-second lower-body sim-PD acknowledgement");
+     }
+-    if (result.duration_s > 60.0 && !xbox_long_duration) {
+-      throw std::runtime_error("extended protected policy actuation must not exceed 60 seconds outside the exact Xbox profile");
++    if (result.duration_s > 60.0) {
++      throw std::runtime_error("extended protected policy actuation must not exceed 60 seconds");
+     }
+   }
+   const bool acknowledged_short_sim_pd_saturation =

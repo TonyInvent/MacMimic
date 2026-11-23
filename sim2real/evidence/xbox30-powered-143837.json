@@ -1,0 +1,75 @@
+{
+  "run": "xbox30-1/trial-20261123-143837",
+  "stages": {
+    "disabled": {
+      "passed": true,
+      "motor_enable_attempts": 0,
+      "final_disabled": 31,
+      "compute_schedule_verified": true,
+      "groups": 2800,
+      "max_feedback_to_tx_receipt_ms": 11.390446,
+      "groups_at_or_above_20ms": 0,
+      "can_deadline_misses": 0,
+      "deadline_stage": ""
+    },
+    "fault": {
+      "passed": true,
+      "motor_enable_attempts": 0,
+      "final_disabled": 31,
+      "compute_schedule_verified": true,
+      "groups": 2248,
+      "max_feedback_to_tx_receipt_ms": 10.908958,
+      "groups_at_or_above_20ms": 0,
+      "can_deadline_misses": 0,
+      "deadline_stage": "target_ipc_pending"
+    },
+    "powered": {
+      "passed": true,
+      "motor_enable_attempts": 31,
+      "final_disabled": 31,
+      "compute_schedule_verified": true,
+      "groups": 2800,
+      "max_feedback_to_tx_receipt_ms": 10.854584,
+      "groups_at_or_above_20ms": 0,
+      "can_deadline_misses": 0,
+      "deadline_stage": ""
+    }
+  },
+  "duration_s": 56,
+  "gain_scale": 1,
+  "input_frames": 1500,
+  "window_nonzero_frames": 1004,
+  "window_connected_frames": 1500,
+  "window_permitted_frames": 1114,
+  "axis_ranges": {
+    "vx": [
+      0,
+      0.4
+    ],
+    "vy": [
+      0,
+      0.0122211
+    ],
+    "wz": [
+      -0.0439988,
+      0.2
+    ]
+  },
+  "command_end": {
+    "vx": 0,
+    "vy": 0,
+    "wz": 0
+  },
+  "torque_stop_verified": true,
+  "torque_excursions": 0,
+  "operator_events": [
+    "WAITING_FOR_ENABLE",
+    "POLICY_DIRECT",
+    "ENABLED_31",
+    "XBOX_READY",
+    "XBOX_END",
+    "DISABLED_31"
+  ],
+  "cpu_restored": "restored",
+  "can_errors": []
+}

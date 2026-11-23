@@ -1,0 +1,55 @@
+--- a/native/src/policy_gamepad.hpp
++++ b/native/src/policy_gamepad.hpp
+@@ -22,7 +22,7 @@
+     cfg.lateral_enabled=true;
+     cfg.forward=.70;
+     cfg.reverse=.50;
+-    cfg.lateral_limit=.42;
++    cfg.lateral_limit=.50;
+     cfg.turn=.70;
+     cfg.acceleration=.10;
+     cfg.deceleration=.175;
+@@ -39,7 +39,7 @@
+     if(int(xbox_control_025)+int(xbox_control_040)+int(xbox_control_070)>1)throw std::runtime_error("conflicting Xbox profiles");
+     if(deadzone>=1 || forward>(xbox_control_070?.70:xbox_control_040?.40:xbox_control_025?.25:.10) ||
+        reverse>(xbox_control_070?.50:.05) || turn>(xbox_control_070?.70:.20) ||
+-       lateral_limit>(xbox_control_070?.42:.10))
++       lateral_limit>(xbox_control_070?.50:.10))
+       throw std::runtime_error("outside candidate command envelope");
+   }
+ };
+--- a/native/tests/test_gamepad_control.cpp
++++ b/native/tests/test_gamepad_control.cpp
+@@ -20,10 +20,10 @@
+     bool allowed=window.allowed(frame,s,now);allowed_frames+=allowed;
+     auto v=command.sample(s,now,allowed);
+     if(frame<=1005)assert(v[0]==0 && v[2]==0);
+-    assert(v[0]>=0 && v[0]<=.70 && v[1]>=0 && v[1]<=.42 && std::abs(v[2])<=.70);
++    assert(v[0]>=0 && v[0]<=.70 && v[1]>=0 && v[1]<=.50 && std::abs(v[2])<=.70);
+     if(v[0]==.70)cap=true;
+     if(frame==1360)assert(v[0]==.70);
+-    if(frame==16001)assert(v[0]==.70 && v[1]==.42 && v[2]==.70);
++    if(frame==16001)assert(v[0]==.70 && v[1]==.50 && v[2]==.70);
+     if(frame>=16203)assert(v[0]==0 && v[1]==0 && v[2]==0);
+   }
+   assert(cap && allowed_frames==14997);
+@@ -81,7 +81,7 @@
+         value=cmd.sample(pad,pad.stamp,release || i<450);
+         if (i==449) {
+           assert(value[0]==(sign>0?.70:-.50));
+-          assert(value[1]==sign*.42 && value[2]==sign*.70);
++          assert(value[1]==sign*.50 && value[2]==sign*.70);
+         }
+       }
+       assert(value[0]==0 && value[1]==0 && value[2]==0);
+--- a/tools/run_supermimic_commissioning.py
++++ b/tools/run_supermimic_commissioning.py
+@@ -617,7 +617,7 @@
+                 if args.gamepad_preview_device or args.gamepad_control_device:
+                     command = feedback[:, 68:71]
+                     wide = macmimic and bool(args.gamepad_control_device)
+-                    limits = (.70, .50, .42, .70) if wide else (
++                    limits = (.70, .50, .50, .70) if wide else (
+                         .40 if args.gamepad_control_device else .10, .05, .10 if macmimic else 0., .20)
+                     forward, reverse, lateral, yaw = limits
+                     if (not np.isfinite(command).all() or np.any(np.abs(command[:, 1]) > (lateral + 1e-6 if lateral else 0.))

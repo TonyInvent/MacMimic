@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "groups": 2800,
+  "motor_dispatches": 86800,
+  "whole_group_driver_span_max_ms": 0.332507,
+  "per_bus_hardware_span_max_ms": 0.615,
+  "actor_target_to_driver_upper_max_ms": 0.960559,
+  "accept_to_driver_upper_max_ms": 0.491176,
+  "oldest_feedback_to_driver_upper_max_ms": 10.141881,
+  "physical_tx_delay_upper_max_ms": 2.288168,
+  "final_disabled_count": 31,
+  "limitations": [
+    "Driver TX is not motor execution acknowledgement.",
+    "Physical TX host-time bounds use send-call entry and hardware completion receipt; no cross-clock subtraction.",
+    "Raw hardware clock is not assumed synchronized between adapters or with the host.",
+    "Disabled validation measures zero-gain frame transport, not powered motion."
+  ]
+}

@@ -1,0 +1,160 @@
+--- a/native/src/policy_gamepad.hpp
++++ b/native/src/policy_gamepad.hpp
+@@ -14,17 +14,32 @@
+   bool xbox_control_025=false;
+   bool xbox_control_040=false;
+   bool lateral_enabled=false;
+-  static constexpr double lateral_limit=.10;
++  bool xbox_control_070=false;
++  double lateral_limit=.10;
++  static GamepadConfig macmimic_xbox() {
++    GamepadConfig cfg;
++    cfg.xbox_control_070=true;
++    cfg.lateral_enabled=true;
++    cfg.forward=.70;
++    cfg.reverse=.50;
++    cfg.lateral_limit=.42;
++    cfg.turn=.70;
++    cfg.acceleration=.10;
++    cfg.deceleration=.175;
++    return cfg;
++  }
+   int forward_sign=-1,turn_sign=-1;
+   double forward=.10,reverse=.05,turn=.20,deadzone=.12;
+   double acceleration=.05,deceleration=.10,yaw_acceleration=.20;
+   void validate() const {
+     if((forward_sign!=1 && forward_sign!=-1)||(turn_sign!=1 && turn_sign!=-1))
+       throw std::runtime_error("axis polarity must be +1 or -1");
+-    for(double v:{forward,reverse,turn,deadzone,acceleration,deceleration,yaw_acceleration})
++    for(double v:{forward,reverse,turn,lateral_limit,deadzone,acceleration,deceleration,yaw_acceleration})
+       if(!std::isfinite(v)||v<=0)throw std::runtime_error("invalid gamepad limits");
+-    if(xbox_control_025 && xbox_control_040)throw std::runtime_error("conflicting Xbox profiles");
+-    if(deadzone>=1 || forward>(xbox_control_040?.40:xbox_control_025?.25:.10) || reverse>.05 || turn>.20)
++    if(int(xbox_control_025)+int(xbox_control_040)+int(xbox_control_070)>1)throw std::runtime_error("conflicting Xbox profiles");
++    if(deadzone>=1 || forward>(xbox_control_070?.70:xbox_control_040?.40:xbox_control_025?.25:.10) ||
++       reverse>(xbox_control_070?.50:.05) || turn>(xbox_control_070?.70:.20) ||
++       lateral_limit>(xbox_control_070?.42:.10))
+       throw std::runtime_error("outside candidate command envelope");
+   }
+ };
+@@ -114,7 +129,7 @@
+     vx_=approach(vx_,v,(allowed && std::abs(v)>std::abs(vx_)?cfg_.acceleration:cfg_.deceleration)*dt);
+     wz_=approach(wz_,w,cfg_.yaw_acceleration*dt);
+     const double lateral = allowed && cfg_.lateral_enabled && !cfg_.forward_only
+-        ? -axis(s.lateral)*GamepadConfig::lateral_limit : 0.;
++        ? -axis(s.lateral)*cfg_.lateral_limit : 0.;
+     vy_=approach(vy_,lateral,(allowed?cfg_.acceleration:cfg_.deceleration)*dt);
+     return {vx_,vy_,wz_};
+   }
+--- a/native/src/sprite_supermimic_replay.cpp
++++ b/native/src/sprite_supermimic_replay.cpp
+@@ -205,9 +205,13 @@
+     sprite_policy::GamepadConfig gamepad_config;
+     gamepad_config.lateral_enabled=macmimic_100k;
+     if(!gamepad_control_device.empty()) {
+-      gamepad_config.xbox_control_040=true;
+-      gamepad_config.forward=.40;
+-      gamepad_config.acceleration=.10;
++      if (macmimic_100k) {
++        gamepad_config=sprite_policy::GamepadConfig::macmimic_xbox();
++      } else {
++        gamepad_config.xbox_control_040=true;
++        gamepad_config.forward=.40;
++        gamepad_config.acceleration=.10;
++      }
+     }
+     sprite_policy::GamepadCommand gamepad_command(gamepad_config);
+     if(!gamepad_preview_device.empty())gamepad_preview=std::make_unique<sprite_policy::LinuxGamepad>(gamepad_preview_device,macmimic_100k);
+--- a/native/src/sprite_can_shadow.cpp
++++ b/native/src/sprite_can_shadow.cpp
+@@ -640,7 +640,7 @@
+     throw std::runtime_error("SuperMimic commissioning requires strict IPC and a bounded duration");
+   }
+   const std::string required_ack = result.xbox_body_admission
+-      ? (result.policy_actuation ? "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_040" : "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_120S_040")
++      ? (result.policy_actuation ? "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_070" : "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_120S_070")
+       : walking
+       ? std::string(result.policy_actuation ? "ENABLE_SUPERMIMIC_WALK_" : "PREVIEW_SUPERMIMIC_WALK_") +
+           (result.walk_speed == .20 ? "020_10S" : result.walk_speed == .25 ? "025_10S" : "030_10S")
+--- a/native/tests/test_bounded_preview.cpp
++++ b/native/tests/test_bounded_preview.cpp
+@@ -247,16 +247,16 @@
+   require(!accepts_duration("10", ten_ack, "0"), "powered SuperMimic requires verified real-time scheduling");
+   constexpr auto sling_ack = "ENABLE_SUPERMIMIC_ZERO_SPD_SLING_WINDOW";
+   for (const char* invalid : {"54", "56", "120", "145", "147", "300", "326", "600"})
+-    require(!accepts_duration(invalid, "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_040", "50", true, nullptr, true),
++    require(!accepts_duration(invalid, "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_070", "50", true, nullptr, true),
+             "Xbox extension requires the exact 146-second profile");
+   require(!accepts_duration("146", "ENABLE_SUPERMIMIC_XBOX_30S", "50", true, nullptr, true),
+           "old acknowledgement must not admit the extended profile");
+ 
+-  require(accepts_duration("146", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_040", "50", true, nullptr, true) &&
+-          !accepts_duration("146", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_040", "50", false, nullptr, true) &&
+-          !accepts_duration("30.5", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_040", "50", true, nullptr, true) &&
++  require(accepts_duration("146", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_070", "50", true, nullptr, true) &&
++          !accepts_duration("146", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_070", "50", false, nullptr, true) &&
++          !accepts_duration("30.5", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_070", "50", true, nullptr, true) &&
+           !accepts_duration("146", sling_ack, "50", true, nullptr, true) &&
+-          !accepts_duration("146", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_040", "50", true, nullptr, false) &&
++          !accepts_duration("146", "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_070", "50", true, nullptr, false) &&
+           !accepts_duration("49.5", "ENABLE_SUPERMIMIC_WALK_025_10S", "50", true, "--walk-025", true),
+           "Xbox body admission is isolated to direct coherent sling commissioning");
+   require(accepts_duration("30.5", sling_ack, "50", true) &&
+--- a/tools/run_supermimic_commissioning.py
++++ b/tools/run_supermimic_commissioning.py
+@@ -489,7 +489,7 @@
+             action = "ENABLE" if mode == "powered" else "PREVIEW"
+             ack = f"{action}_SUPERMIMIC_WALK_{walk_code}_10S"
+         if args.gamepad_control_device:
+-            ack = "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_040" if mode == "powered" else "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_120S_040"
++            ack = "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_120S_070" if mode == "powered" else "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_120S_070"
+         can = launch("can", [can_binary, "--supermimic-commissioning", *options, *tracking, *direct, *coherent, *walking, *can_status,
+             "--acknowledge-hardware-tx", ack, "--all-motors-disabled-confirmed", "--config", out/"motors.tsv",
+             "--kinematics-config", out/"kinematics.tsv", "--joint-safety-config", out/"joints.tsv",
+@@ -616,9 +616,13 @@
+                 feedback = np.fromfile(out/"native.bin.inputs", dtype="<f8").reshape(frames, 71)
+                 if args.gamepad_preview_device or args.gamepad_control_device:
+                     command = feedback[:, 68:71]
+-                    if (not np.isfinite(command).all() or np.any(np.abs(command[:, 1]) > (.100001 if macmimic else 0.))
+-                        or np.any(command[:, 0] < -.050001) or np.any(command[:, 0] > (.400001 if args.gamepad_control_device else .100001))
+-                        or np.any(np.abs(command[:, 2]) > .200001)):
++                    wide = macmimic and bool(args.gamepad_control_device)
++                    limits = (.70, .50, .42, .70) if wide else (
++                        .40 if args.gamepad_control_device else .10, .05, .10 if macmimic else 0., .20)
++                    forward, reverse, lateral, yaw = limits
++                    if (not np.isfinite(command).all() or np.any(np.abs(command[:, 1]) > (lateral + 1e-6 if lateral else 0.))
++                        or np.any(command[:, 0] < -reverse - 1e-6) or np.any(command[:, 0] > forward + 1e-6)
++                        or np.any(np.abs(command[:, 2]) > yaw + 1e-6)):
+                         raise RuntimeError("gamepad command exceeds its selected envelope")
+                     if args.gamepad_control_device and (np.any(command[:1002] != 0) or np.any(command[7205:] != 0)):
+                         raise RuntimeError("Xbox commands escaped the bounded control window")
+--- a/native/tests/test_gamepad_control.cpp
++++ b/native/tests/test_gamepad_control.cpp
+@@ -66,6 +66,27 @@
+     }
+     assert(cmd[1]==-direction*.10);
+   }
++  const auto wide=GamepadConfig::macmimic_xbox();
++  for (const int sign : {-1,1}) {
++    for (const bool release : {false,true}) {
++      GamepadCommand cmd(wide);
++      GamepadSnapshot pad{};
++      pad.connected=pad.permitted=true;
++      pad.lt=1;
++      pad.forward=pad.lateral=pad.turn=-sign;
++      std::array<double,3> value{};
++      for (int i=0;i<=650;++i) {
++        if (release && i>=450) pad.permitted=false;
++        pad.stamp=(i+1)*20000000ULL;
++        value=cmd.sample(pad,pad.stamp,release || i<450);
++        if (i==449) {
++          assert(value[0]==(sign>0?.70:-.50));
++          assert(value[1]==sign*.42 && value[2]==sign*.70);
++        }
++      }
++      assert(value[0]==0 && value[1]==0 && value[2]==0);
++    }
++  }
+   GamepadConfig legacy;legacy.xbox_control_025=true;legacy.forward=.40;
+   bool rejected=false;try{legacy.validate();}catch(...){rejected=true;}assert(rejected);
+   auto excessive=cfg;excessive.forward=.41;rejected=false;

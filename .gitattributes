@@ -1,0 +1,8 @@
+runtime/** -text
+sim2real/hardware/** -text
+sim2real/kcan/** -text
+sim2real/evidence/*.bin binary
+sim2real/patches/*.patch -text
+policies/opensprite-velocity-100k/*.json text eol=lf
+sim2real/*.sh text eol=lf
+scripts/*253.sh text eol=lf

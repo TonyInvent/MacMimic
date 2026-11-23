@@ -1,0 +1,151 @@
+{
+  "mode": "powered",
+  "passed": true,
+  "failure": null,
+  "duration_s": 146.0,
+  "gain_scale": 1.0,
+  "xbox_leg_waist_gain_scale": 1.0,
+  "training_full_body": true,
+  "standing_admission": null,
+  "feedback_torque_mode": "stop",
+  "xbox_forward_acceleration_m_s2": 0.1,
+  "direct_policy_start": true,
+  "coherent_action_send": true,
+  "action_history": "policy_output",
+  "tracked_startup": true,
+  "startup": {
+    "gain_ramp_completed": true,
+    "final_goal_error_rad": 0.185697678492,
+    "joint_settled": false,
+    "held_joint_count": 0,
+    "last_second_gyro_peak_rad_s": 0.06925216255949897,
+    "last_second_tilt_peak_deg": 3.500198020384712,
+    "body_settled": true
+  },
+  "sling_window": true,
+  "walk_020": false,
+  "walk_speed_m_s": 0.0,
+  "operator_events": [
+    "WAITING_FOR_ENABLE",
+    "POLICY_DIRECT",
+    "ENABLED_31",
+    "XBOX_READY",
+    "XBOX_END",
+    "DISABLED_31"
+  ],
+  "sling_checkpoint": {
+    "sling_window_opened": true,
+    "sling_notice_to_blend_ms": 0.0,
+    "sling_checkpoint_sequence": 1000,
+    "sling_checkpoint_joint_frames": 50,
+    "sling_checkpoint_body_frames": 50
+  },
+  "walk_checkpoint": {
+    "walk_checkpoint_sequence": 0,
+    "walk_checkpoint_joint_frames": 0,
+    "walk_checkpoint_body_frames": 0,
+    "walk_joint_settling_required": false,
+    "walk_speed_m_s": 0.0
+  },
+  "can_schedule": {
+    "cpu": 2,
+    "policy": "SCHED_FIFO",
+    "priority": 50
+  },
+  "inference_affinity": {
+    "main_cpu": 4,
+    "ort_worker_cpu": 5,
+    "inference_threads": 2,
+    "io_cpu": 1,
+    "threads": [
+      {
+        "tid": 7815,
+        "cpu": 4
+      },
+      {
+        "tid": 7817,
+        "cpu": 1
+      },
+      {
+        "tid": 7818,
+        "cpu": 5
+      },
+      {
+        "tid": 7819,
+        "cpu": 1
+      }
+    ],
+    "verified": true
+  },
+  "inference_no_spinning": true,
+  "cpu_frequency": {
+    "requested_khz": 1344000,
+    "acquired": {
+      "status": "acquired",
+      "target_khz": 1344000,
+      "before": {
+        "scaling_min_freq": "729600",
+        "scaling_max_freq": "1344000",
+        "scaling_governor": "schedutil",
+        "related_cpus": "4 5"
+      },
+      "active": {
+        "scaling_min_freq": "1344000",
+        "scaling_max_freq": "1344000",
+        "scaling_governor": "schedutil",
+        "related_cpus": "4 5"
+      },
+      "guard_sha256": "5b2b9a4c25f4f75cf6252a222874798cbe0bd5f9716fac886741be2f594a2ace"
+    },
+    "released": {
+      "status": "restored",
+      "changed": true,
+      "before": {
+        "scaling_min_freq": "729600",
+        "scaling_max_freq": "1344000",
+        "scaling_governor": "schedutil",
+        "related_cpus": "4 5"
+      },
+      "after": {
+        "scaling_min_freq": "729600",
+        "scaling_max_freq": "1344000",
+        "scaling_governor": "schedutil",
+        "related_cpus": "4 5"
+      }
+    }
+  },
+  "timing_max_ms": {
+    "can_feedback": 5.892089,
+    "state_ipc": 0.385845,
+    "actor_preprocess": 0.152424,
+    "inference": 3.366807,
+    "actor_postprocess": 0.013441,
+    "target_ipc": 0.552542,
+    "total": 9.836496
+  },
+  "deadline_stage": "",
+  "velocity_command": null,
+  "command_source": "xbox_control",
+  "motor_enable_attempts": 31,
+  "final_disabled_count": 31,
+  "fingerprints": {
+    "run_supermimic_commissioning.py": "9232b21d73ba9aab1949587e0f79e3f8e3158b2b3cd6ec3ea1fda94fa85f0d0a",
+    "policy.onnx": "2ab5220171e9119028194ce6f0e0700beecfa87deb1af0d8b882340a3ae2de34",
+    "sprite_icm45686": "fbdc98f7b7f885023618c8111de16c33525af7d0530d46049a5148cc787a330b",
+    "sprite_can_shadow": "f84b7148629e5ec951142b56d46834e2523b71be571e105f9dbdb51a7c1cbf2f",
+    "sprite_supermimic_protected_ipc": "75caf161179fcd4d51ed5fd2aae103fe01b6c90f93d12ff8b2aa9f656b39fe52",
+    "motors.tsv": "20436269e374ca5671ba6dc439f1611dfee33789b93812590804cfd2cdcf21d4",
+    "kinematics.tsv": "9b47255137997ae1f0da2845be8b8548dae537c1658741469ffe9d3c6ab38cc9",
+    "joints.tsv": "850bfefb763eee4666129a269fac5d68c7be6dd23df085bb00a88ece30e6c56b",
+    "feedback.bin": "d03e9f0c34f8c7f6182474178927b9749699a54c7885a859fdbeffc82111191c",
+    "target.bin": "e1d086c8129cab2f09d3ade7911ef6aeb31f7b6da846db400158a5d571cd4653",
+    "input.bin": "e0a405bc961cc1baf924cde7f0bb997602e04b7ee746aedbfb440f57e5009cc2",
+    "inference_cpu_frequency_khz": 1344000,
+    "cpu_frequency_client.py": "0e9bf869466aebcd6043a9178c459b58a3752817f349caa68b92012af8976f29",
+    "cpu_frequency_guard.py": "5b2b9a4c25f4f75cf6252a222874798cbe0bd5f9716fac886741be2f594a2ace",
+    "action_tx_audit.py": "79371a8a147b15f02c616367fa55fe5cc2c58c4ae5aebc998819602ad24e3bb8",
+    "loaded_kcan_srcversion": "404E8D65A6EFF60079EAEC1"
+  },
+  "hardware_qualified": false,
+  "powered_walking_ready": false
+}

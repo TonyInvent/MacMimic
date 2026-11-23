@@ -1,0 +1,52 @@
+# OpenSprite v5 on Jetson 253
+
+The 100k MacMimic actor runs at 50 Hz against live joint and ICM45686 feedback. The native CAN controller drives 31 joints across four KCAN FD interfaces. In the 300-second powered Xbox trial the controller completed 16,300 action groups over 326 seconds, including standing and braking. The maximum host time from oldest feedback to the final hardware TX completion report was 11.396 ms against a 20 ms limit. All 31 drives reported disabled at exit. The controller used the full training Kp/Kd. [Powered report](evidence/xbox300-commissioning.json) · [Motor TX audit](evidence/xbox300-action-tx-audit.json) · [Command range and completion timing](evidence/xbox300-summary.json)
+
+## Controls and hardware evidence
+
+| Profile | Xbox input | Forward / reverse (m/s) | Lateral (m/s) | Yaw (rad/s) | Recorded result |
+| --- | ---: | --- | --- | --- | --- |
+| Initial | 30 s | +0.40 / −0.05 | ±0.10 | ±0.20 | [Powered pass](evidence/xbox30-commissioning.json) |
+| Extended | 120 s | +0.40 / −0.05 | ±0.10 | ±0.20 | [Powered pass](evidence/xbox120-commissioning.json) |
+| Wide | 120 s | +0.70 / −0.50 | ±0.42 | ±0.70 | [Powered pass](evidence/xbox120-wide-commissioning.json) |
+| Wide | 300 s | +0.70 / −0.50 | ±0.42 | ±0.70 | [Powered pass](evidence/xbox300-commissioning.json) |
+| Current checkout | 300 s | +0.70 / −0.50 | ±0.50 | ±0.70 | Native tests and recorded replay passed. Powered validation of this build is pending. |
+
+These ranges are command limits. In the 300-second powered run the policy received lateral commands from −0.068 to +0.061 m/s and yaw commands from −0.70 to +0.70 rad/s. Measured lateral ground speed was not available. Hardware results apply to the robot, calibration and fingerprints recorded with each trial.
+
+The left stick controls forward/reverse and lateral velocity (left positive). Right-stick X controls yaw. After the control window opens, center the sticks, release LT and hold it again to command movement. Releasing LT brakes the command. In the current build, maximum lateral command takes about 5 s from rest and returns to zero in about 2.9 s on LT release. Each powered session begins with stationary IMU calibration and 20 s of supported standing. Window closure starts braking and the controller checks individual disable feedback at shutdown.
+
+## Rebuild from this checkout
+
+Run on the prepared Jetson with a matching ONNX Runtime CPU library and C++ headers (the recorded version was 1.23.2), CMake, a C++17 toolchain and Python with NumPy and ONNX Runtime. The checkout includes the [actor and bound profile](../policies/opensprite-velocity-100k/), [native sources](../runtime/native/), and [253 hardware configuration](hardware/). The latter contains robot-specific joint signs, offsets and limits. The existing Jetson Python and ORT locations are defaults. Override them with `SPRITE_PYTHON`, `SPRITE_ORT_INCLUDE` and `SPRITE_ORT_LIBRARY` when necessary.
+
+```bash
+bash sim2real/build-jetson.sh
+```
+
+This file-only build runs the native and ICM tests, verifies the model bundle, and compares an 803-frame recorded-input replay against its known output hash. It writes to `sim2real/build/jetson253`. Rebuild after moving the checkout because the local checksum manifest includes source paths.
+
+## Commission on the prepared robot
+
+The operator entry uses the existing 253 commissioning lock, CPU-frequency lease service, Xbox joystick at `/dev/input/js0`, SPI IMU and four configured CAN interfaces. The CAN thread runs FIFO 50 on CPU 2. Inference uses CPU 4 and CPU 5 with RR 1 and a 1.344 GHz lease. An earlier trace found a 9.905 ms runnable wait on CPU 4 during a missed deadline. [Scheduler comparison](evidence/wakeup-ab-summary.json)
+
+After a Jetson reboot, check the loaded KCAN module. The tested echo-order module has srcversion `404E8D65A6EFF60079EAEC1` on kernel `5.15.199-tegra`. The [253 loader](../scripts/load-kcan-253.sh) checks and loads the existing host-specific modules. The [driver patch and setup files](kcan/) record the change and bus configuration. The loader expects the candidate and rollback modules already installed on the commissioning host.
+
+```bash
+bash scripts/load-kcan-253.sh --check
+# If a reload is needed, with the drives disabled:
+sudo bash scripts/load-kcan-253.sh
+bash scripts/xbox300-vy050-macmimic-253.sh --qualify
+```
+
+`--qualify` runs disabled transport and intentional deadline rejection with the same build. It saves each passing phase separately. `--check-cache` checks the saved evidence. For a powered trial use the following entry at the robot, with fall protection in place and the physical motor cutoff within reach. It checks the evidence again and waits for the operator to enter `XBOX300`.
+
+```bash
+bash scripts/xbox300-vy050-macmimic-253.sh
+```
+
+Other [253 launchers](../scripts/) and the [initial preflight and trace analysis](jetson253/) refer to their original commissioning directories. [Incremental patches](patches/) record the development sequence from upstream through the 100k port, Xbox 30 s, Xbox 120 s, wide range, Xbox 300 s and lateral ±0.50 m/s. The checkout already contains the final source. Trial reports retain their original hardware qualification fields and binary hashes. A fresh build must collect its own admission evidence.
+
+## Source and licensing
+
+The runtime derives from [OpenSprite-SuperMimic at fe4e74f](https://github.com/TonyInvent/OpenSprite-SuperMimic/tree/fe4e74f96117debbd66e5511af256418e1edcd23/runtime). The runtime package declares AGPL-3.0-only. Its [license](../runtime/LICENSE) and the [TDK IMU license](../runtime/native/third_party/tdk_icm45686/LICENSE) are included. The MacMimic changes bind the 100k contract, retain raw previous actions and the training pose handoff, and add lateral Xbox control and bounded hardware profiles.
