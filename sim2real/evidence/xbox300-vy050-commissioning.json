@@ -1,0 +1,134 @@
+{
+  "mode": "powered",
+  "passed": false,
+  "failure": "CAN 2: ['protected-policy dynamic guard failed for left_hip_pitch_motor reason=feedback_torque q=-0.0230793 q_min=-2.74 q_max=2.74 qd=-1.08913 qd_limit=9.3 tau=-28 tau_observation_boundary=27.9932']; actor 1: state receive timeout/error",
+  "duration_s": 326.0,
+  "gain_scale": 1.0,
+  "xbox_leg_waist_gain_scale": 1.0,
+  "training_full_body": true,
+  "standing_admission": null,
+  "feedback_torque_mode": "stop",
+  "xbox_forward_acceleration_m_s2": 0.1,
+  "direct_policy_start": true,
+  "coherent_action_send": true,
+  "action_history": "policy_output",
+  "tracked_startup": true,
+  "startup": null,
+  "sling_window": true,
+  "walk_020": false,
+  "walk_speed_m_s": 0.0,
+  "operator_events": [
+    "WAITING_FOR_ENABLE",
+    "POLICY_DIRECT",
+    "ENABLED_31",
+    "XBOX_READY",
+    "DISABLED_31"
+  ],
+  "sling_checkpoint": {
+    "sling_window_opened": true,
+    "sling_notice_to_blend_ms": 0.0,
+    "sling_checkpoint_sequence": 1000,
+    "sling_checkpoint_joint_frames": 50,
+    "sling_checkpoint_body_frames": 50
+  },
+  "walk_checkpoint": {
+    "walk_checkpoint_sequence": 0,
+    "walk_checkpoint_joint_frames": 0,
+    "walk_checkpoint_body_frames": 0,
+    "walk_joint_settling_required": false,
+    "walk_speed_m_s": 0.0
+  },
+  "can_schedule": {
+    "cpu": 2,
+    "policy": "SCHED_FIFO",
+    "priority": 50
+  },
+  "inference_affinity": {
+    "main_cpu": 4,
+    "ort_worker_cpu": 5,
+    "inference_threads": 2,
+    "io_cpu": 1,
+    "threads": [
+      {
+        "tid": 10232,
+        "cpu": 4
+      },
+      {
+        "tid": 10234,
+        "cpu": 1
+      },
+      {
+        "tid": 10235,
+        "cpu": 5
+      },
+      {
+        "tid": 10236,
+        "cpu": 1
+      }
+    ],
+    "verified": true
+  },
+  "inference_no_spinning": true,
+  "cpu_frequency": {
+    "requested_khz": 1344000,
+    "acquired": {
+      "status": "acquired",
+      "target_khz": 1344000,
+      "before": {
+        "scaling_min_freq": "729600",
+        "scaling_max_freq": "1344000",
+        "scaling_governor": "schedutil",
+        "related_cpus": "4 5"
+      },
+      "active": {
+        "scaling_min_freq": "1344000",
+        "scaling_max_freq": "1344000",
+        "scaling_governor": "schedutil",
+        "related_cpus": "4 5"
+      },
+      "guard_sha256": "5b2b9a4c25f4f75cf6252a222874798cbe0bd5f9716fac886741be2f594a2ace"
+    },
+    "released": {
+      "status": "restored",
+      "changed": true,
+      "before": {
+        "scaling_min_freq": "729600",
+        "scaling_max_freq": "1344000",
+        "scaling_governor": "schedutil",
+        "related_cpus": "4 5"
+      },
+      "after": {
+        "scaling_min_freq": "729600",
+        "scaling_max_freq": "1344000",
+        "scaling_governor": "schedutil",
+        "related_cpus": "4 5"
+      }
+    }
+  },
+  "timing_max_ms": null,
+  "deadline_stage": "",
+  "velocity_command": null,
+  "command_source": "xbox_control",
+  "motor_enable_attempts": 31,
+  "final_disabled_count": 31,
+  "fingerprints": {
+    "run_supermimic_commissioning.py": "3b021d3d37665a2d2c4548894201820aee6e99ea067e80a8dcc07c5c69402f69",
+    "policy.onnx": "2ab5220171e9119028194ce6f0e0700beecfa87deb1af0d8b882340a3ae2de34",
+    "sprite_icm45686": "fbdc98f7b7f885023618c8111de16c33525af7d0530d46049a5148cc787a330b",
+    "sprite_can_shadow": "9fa06bec7ab2d23cfea23750a8a4f5893b0e339657016c52bd27b0d4eef1b3b0",
+    "sprite_supermimic_protected_ipc": "bd9f4501972d00a80d78c3f93589d7c23e54632651e31d6fd458d4c42513c084",
+    "motors.tsv": "20436269e374ca5671ba6dc439f1611dfee33789b93812590804cfd2cdcf21d4",
+    "kinematics.tsv": "9b47255137997ae1f0da2845be8b8548dae537c1658741469ffe9d3c6ab38cc9",
+    "joints.tsv": "850bfefb763eee4666129a269fac5d68c7be6dd23df085bb00a88ece30e6c56b",
+    "feedback.bin": "d03e9f0c34f8c7f6182474178927b9749699a54c7885a859fdbeffc82111191c",
+    "target.bin": "e1d086c8129cab2f09d3ade7911ef6aeb31f7b6da846db400158a5d571cd4653",
+    "input.bin": "5e467767d32ae2994c41c9e4def545a64b60fcb336360177a011bfd6a5635bf7",
+    "inference_cpu_frequency_khz": 1344000,
+    "cpu_frequency_client.py": "0e9bf869466aebcd6043a9178c459b58a3752817f349caa68b92012af8976f29",
+    "cpu_frequency_guard.py": "5b2b9a4c25f4f75cf6252a222874798cbe0bd5f9716fac886741be2f594a2ace",
+    "action_tx_audit.py": "79371a8a147b15f02c616367fa55fe5cc2c58c4ae5aebc998819602ad24e3bb8",
+    "loaded_kcan_srcversion": "404E8D65A6EFF60079EAEC1"
+  },
+  "hardware_qualified": false,
+  "powered_walking_ready": false
+}

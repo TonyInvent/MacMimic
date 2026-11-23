@@ -10,11 +10,17 @@ The 100k MacMimic actor runs at 50 Hz against live joint and ICM45686 feedback. 
 | Extended | 120 s | +0.40 / −0.05 | ±0.10 | ±0.20 | [Powered pass](evidence/xbox120-commissioning.json) |
 | Wide | 120 s | +0.70 / −0.50 | ±0.42 | ±0.70 | [Powered pass](evidence/xbox120-wide-commissioning.json) |
 | Wide | 300 s | +0.70 / −0.50 | ±0.42 | ±0.70 | [Powered pass](evidence/xbox300-commissioning.json) |
-| Current checkout | 300 s | +0.70 / −0.50 | ±0.50 | ±0.70 | Native tests and recorded replay passed. Powered validation of this build is pending. |
+| Current checkout | 300 s | +0.70 / −0.50 | ±0.50 | ±0.70 | Left and right strafing confirmed on hardware. [Trial ended on feedback torque protection](evidence/xbox300-vy050-commissioning.json). |
 
-These ranges are command limits. In the 300-second powered run the policy received lateral commands from −0.068 to +0.061 m/s and yaw commands from −0.70 to +0.70 rad/s. Measured lateral ground speed was not available. Hardware results apply to the robot, calibration and fingerprints recorded with each trial.
+These ranges are command limits. In the completed ±0.42 m/s trial the policy received lateral commands from −0.068 to +0.061 m/s and yaw commands from −0.70 to +0.70 rad/s. Measured lateral ground speed was not available. Hardware results apply to the robot, calibration and fingerprints recorded with each trial.
 
 The left stick controls forward/reverse and lateral velocity (left positive). Right-stick X controls yaw. After the control window opens, center the sticks, release LT and hold it again to command movement. Releasing LT brakes the command. In the current build, maximum lateral command takes about 5 s from rest and returns to zero in about 2.9 s on LT release. Each powered session begins with stationary IMU calibration and 20 s of supported standing. Window closure starts braking and the controller checks individual disable feedback at shutdown.
+
+### Bidirectional strafing at the ±0.50 m/s command limit
+
+On November 23, 2026, the onsite operator confirmed normal leftward and rightward walking on Jetson 253 in trial `trial-20261123-164524-MBuZ`. The recorded policy inputs reached both lateral command limits, −0.50 and +0.50 m/s. Lateral ground speed was not measured.
+
+The 300-second input window ended early. The left hip pitch motor reported −28.0 Nm, triggering its feedback torque guard (threshold magnitude 27.9932 Nm). All 31 drives then confirmed disabled. The TX audit passed for all 4,831 dispatched action groups. [Commissioning report](evidence/xbox300-vy050-commissioning.json) · [TX audit](evidence/xbox300-vy050-action-tx-audit.json)
 
 ## Rebuild from this checkout
 

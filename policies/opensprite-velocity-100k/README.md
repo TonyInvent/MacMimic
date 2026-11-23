@@ -1,6 +1,6 @@
 # OpenSprite v5 Xbox velocity policy · update 100,000
 
-This is the seed 49 MacMimic policy for the SuperMimic §4.5 / Appendix G velocity task on OpenSprite v5. Training from scratch took 38 h 32 min on a 48 GB M4 Pro. The archive includes the final actor, its matching JSON contract, the 37-second virtual Xbox replay and evaluation results. The 300-second Xbox trial on Jetson 253 passed with a lateral command limit of +/-0.42 m/s. The current deployment source raises this limit to +/-0.50 m/s. [Hardware results and runtime](../../sim2real/README.md)
+This is the seed 49 MacMimic policy for the SuperMimic §4.5 / Appendix G velocity task on OpenSprite v5. Training from scratch took 38 h 32 min on a 48 GB M4 Pro. The archive includes the final actor, its matching JSON contract, the 37-second virtual Xbox replay and evaluation results. The 300-second Xbox trial on Jetson 253 passed with a lateral command limit of +/-0.42 m/s. With the current ±0.50 m/s lateral command profile, the onsite operator observed normal leftward and rightward walking. This trial ended early when left hip pitch feedback torque triggered a protective stop; all 31 drives confirmed disabled. [Hardware results and runtime](../../sim2real/README.md)
 
 ## Load the policy
 
