@@ -1,0 +1,76 @@
+{
+  "capture": "/home/tony/macmimic-openimu-8FOO0s/imu-motion-sp01p9sc",
+  "fault": {
+    "consumer": "healthy_snapshots=104 rejection_after_freeze_ms=29.7378 oldest_accepted_ms=29.9246 reason=IMU snapshot stale",
+    "consumer_exit": 0,
+    "producer_exit": 1,
+    "producer_log": "BIAS_READY: movement may begin\nstale OpenIMU kernel RX timestamp"
+  },
+  "end_reason": "three_axes_then_rest",
+  "sensor_delta_us": [
+    1250.0
+  ],
+  "axes": {
+    "x": {
+      "active_s": 15.8475,
+      "canfd_range_rad_s": [
+        -0.720570457315056,
+        0.9234283739811959
+      ],
+      "spi_range_rad_s": [
+        -0.7240952774358012,
+        0.926284539444657
+      ],
+      "correlation": 0.999487126779713,
+      "canfd_to_spi_amplitude": 0.9877218151018741,
+      "rms_difference_rad_s": 0.009620278041068402
+    },
+    "y": {
+      "active_s": 15.2925,
+      "canfd_range_rad_s": [
+        -1.9825904380858164,
+        1.9828192558284863
+      ],
+      "spi_range_rad_s": [
+        -1.9806531752711571,
+        1.9880283307238
+      ],
+      "correlation": 0.9999268257283114,
+      "canfd_to_spi_amplitude": 0.9979321378635297,
+      "rms_difference_rad_s": 0.008982150360339093
+    },
+    "z": {
+      "active_s": 26.7075,
+      "canfd_range_rad_s": [
+        -0.8409787074836858,
+        0.6797786713134876
+      ],
+      "spi_range_rad_s": [
+        -0.7797434337758136,
+        0.713024230782875
+      ],
+      "correlation": 0.9974103235090569,
+      "canfd_to_spi_amplitude": 1.006582582619496,
+      "rms_difference_rad_s": 0.0181767357638749
+    }
+  },
+  "motor_interfaces_at_end": {
+    "kcan1": "down",
+    "kcan2": "down",
+    "kcan3": "down",
+    "kcan4": "down"
+  },
+  "gyro_rotation_fit": {
+    "sample_grid_hz": 400,
+    "motion_min_speed_rad_s": 0.12,
+    "samples": 9066,
+    "singular_values": [
+      3303.3875538933135,
+      742.9996192573793,
+      391.44741887018466
+    ],
+    "relative_angle_deg": 2.2380798475595545,
+    "rms_vector_difference_rad_s_before": 0.02479441814006629,
+    "rms_vector_difference_rad_s_after": 0.00667897033639602
+  }
+}

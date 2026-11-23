@@ -26,4 +26,5 @@ cmake --build "$work/icm" -j3
 (cd "$work" && echo '8e72574bc19499930e7f502188b96f9e2592cf8441bf3487b8d4f661b3476627  replay.bin' | sha256sum -c -)
 (cd "$work" && sha256sum build/sprite_can_shadow build/sprite_supermimic_protected_ipc \
   icm/sprite_icm45686 "$runtime/tools/run_supermimic_commissioning.py" "$runtime/tools/action_tx_audit.py" \
+  "$runtime/tools/openimu_interface.py" \
   replay.bin > trial.sha256.tmp && mv trial.sha256.tmp trial.sha256)

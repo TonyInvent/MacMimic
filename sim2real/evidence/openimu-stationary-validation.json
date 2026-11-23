@@ -1,0 +1,101 @@
+{
+  "test": "Jetson 253 stationary OpenIMU CAN FD with recorded-input inference load",
+  "deployment": "/home/tony/macmimic-openimu-8FOO0s",
+  "capture": "/home/tony/macmimic-openimu-8FOO0s/canfd-soak-m57n64l7",
+  "source": {
+    "usb_id": "0c72:0012",
+    "usb_port": "1-2.3",
+    "interface": "kcan5",
+    "frame_id": 1,
+    "mount": "X_DOWN_Z_BACK",
+    "nominal_hz": 800
+  },
+  "stationary_60s": {
+    "frames": 47576,
+    "hz": 792.8990631049022,
+    "tick_us": {
+      "min": 1250,
+      "p50": 1250,
+      "p99": 1250,
+      "max": 1250
+    },
+    "sensor_gaps_over_1875us": 0,
+    "rx_delta_us": {
+      "min": 557.953,
+      "p50": 1260.914,
+      "p99": 1342.239,
+      "max": 1994.153
+    },
+    "rx_to_read_us": {
+      "min": 6.785,
+      "p50": 14.466,
+      "p99": 87.082,
+      "max": 18189.008
+    },
+    "body_accel": [
+      0.6670842865898525,
+      0.49004385316373117,
+      9.754601653183313
+    ]
+  },
+  "soak": {
+    "duration_s": 600,
+    "frames": 475807,
+    "host_rate_hz": 793.0089013231743,
+    "sensor_interval_us": {
+      "min": 1250.0,
+      "median": 1250.0,
+      "p99": 1250.0,
+      "max": 1250.0
+    },
+    "intervals_above_1875us": 0,
+    "kernel_rx_interval_us": {
+      "min": 112.424,
+      "median": 1260.438,
+      "p99": 1343.5105,
+      "max": 2232.434
+    },
+    "rx_to_read_ms": {
+      "min": 0.006784,
+      "median": 0.014625,
+      "p99": 0.08982276000000002,
+      "max": 13.31843
+    },
+    "ipc_packets": 29000,
+    "ipc_age_p99_ms": 1.424643,
+    "ipc_age_max_ms": 3.794991,
+    "completed_803_frame_inference_batches": 35,
+    "recorded_input_deadline_misses": 0,
+    "recorded_input_hardware_tx": 0
+  },
+  "production_client_60s": {
+    "snapshots": 3000,
+    "max_age_ms": 6.48734,
+    "mean_body_gyro_rad_s": [
+      -8.70722e-06,
+      5.08391e-06,
+      7.34737e-06
+    ],
+    "mean_projected_gravity": [
+      -0.0682344,
+      -0.0499944,
+      -0.996416
+    ]
+  },
+  "overlapping_static_comparison": {
+    "canfd_samples": 47575,
+    "spi_samples": 47502,
+    "canfd_mean_body_accel_m_s2": [
+      0.667767074401695,
+      0.48983028380520166,
+      9.75421414029221
+    ],
+    "spi_mean_body_accel_m_s2": [
+      0.3938607645103933,
+      0.127755597539936,
+      9.809992366403343
+    ],
+    "gravity_angle_deg": 2.667929044330619
+  },
+  "hardware_scope": "IMU acquisition and IPC only. Motor interfaces remained down. Dynamic three-axis agreement and powered operation have not been tested with this backend."
+}

@@ -5,18 +5,25 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 runtime="$repo/runtime"
 hardware="$repo/sim2real/hardware"
 cd "$repo/sim2real/build/jetson253"
-case "${1:-}" in
-  ""|--qualify|--check-cache) ;;
-  *) echo "Usage: bash operator.sh [--qualify|--check-cache]" >&2; exit 2 ;;
-esac
-[[ $# -le 1 ]]
+operation=
+imu_backend=canfd
+imu_options=()
+while (($#)); do
+  case "$1" in
+    --qualify|--check-cache) [[ -z $operation ]] || exit 2; operation=$1 ;;
+    --imu-backend) [[ ${2:-} == canfd || ${2:-} == spi ]] || exit 2; imu_backend=$2; shift ;;
+    --imu-can-interface) [[ -n ${2:-} ]] || exit 2; imu_options+=(--imu-can-interface "$2"); shift ;;
+    *) echo "Usage: $0 [--qualify|--check-cache] [--imu-backend canfd|spi] [--imu-can-interface IFACE]" >&2; exit 2 ;;
+  esac
+  shift
+done
 [[ $(hostname -s) == tony-jetson && $(id -un) == tony  ]]
 python=${SPRITE_PYTHON:-/home/tony/open_sprite_runtime/.venv/bin/python}
-if [[ -z ${1:-} && ( ! -t 0 || ! -t 1 ) ]]; then
+if [[ -z $operation && ( ! -t 0 || ! -t 1 ) ]]; then
   echo "Start the powered trial at the operator terminal." >&2
   exit 2
 fi
-if [[ ${1:-} != --check-cache && ! -r /dev/input/js0 ]]; then
+if [[ $operation != --check-cache && ! -r /dev/input/js0 ]]; then
   echo "Connect the Xbox controller before starting." >&2
   exit 2
 fi
@@ -47,6 +54,7 @@ run_phase() {
     --hardware "$hardware/hardware.json" \
     --joint-limits "$hardware/joint-limits.json" \
     --build "$PWD/build" --icm "$PWD/icm/sprite_icm45686" \
+    --imu-backend "$imu_backend" "${imu_options[@]}" \
     --lock "/home/tony/supermimic-run002-20261106/commissioning.lock" --output "$output/$phase" \
     --tracked-startup "$hardware/reviewed-profile" \
     --training-full-body --direct-policy-start --coherent-action-send --sling-window \
@@ -71,7 +79,6 @@ ensure_phase() {
   run_phase "$phase" "$@"
   ln -sfnT "$output/$phase" "$cached"
 }
-operation=${1:-}
 ensure_phase disabled --passed-disabled
 ensure_phase fault --passed-deadline-fault --deadline-fault
 if [[ -n $operation ]]; then exit 0; fi

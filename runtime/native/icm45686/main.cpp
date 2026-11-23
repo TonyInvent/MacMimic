@@ -74,9 +74,11 @@ struct Row {
 };
 struct Timing { uint64_t event,start,end,cpu; uint32_t sequence; int rejected; };
 }
+int capture_openimu(int argc, char** argv);
 int main(int argc,char** argv) {
   if(argc==1 || std::string(argv[1])=="--help") {
-    std::cout<<"NO CAN. probe SPI | capture SPI GPIOCHIP OFFSET RATE SECONDS CSV X_DOWN_Z_BACK CONFIGURE_ICM45686_RAW_NO_CAN\n"
+    std::cout<<"capture-canfd IFACE SECONDS CSV (OpenIMU, 800 Hz)\n"
+      <<"probe SPI | capture SPI GPIOCHIP OFFSET RATE SECONDS CSV X_DOWN_Z_BACK CONFIGURE_ICM45686_RAW_NO_CAN\n"
       <<"400/800Hz only; capture uses x-down/z-back mounting, 15s stationary bias included in duration.\n";
     return 0;
   }
@@ -84,6 +86,7 @@ int main(int argc,char** argv) {
   std::vector<Timing> timings;
   uint64_t missed=0,coalesced=0,late=0;int rate=0;
   try {
+    if (std::string(argv[1])=="capture-canfd") return capture_openimu(argc,argv);
     const bool probe=std::string(argv[1])=="probe";
     if((probe && argc!=3) || (!probe && (argc!=10 || std::string(argv[1])!="capture")))throw std::runtime_error("invalid arguments; see --help");
     double seconds=0;

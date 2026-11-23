@@ -16,6 +16,7 @@ import threading
 import time
 
 from cpu_frequency_client import CpuFrequencyLease
+from openimu_interface import find_openimu
 
 import numpy as np
 
@@ -250,6 +251,7 @@ def verify_standing_evidence(directory, fingerprints, training_full_body, body_c
     if (standing["mode"] != "powered" or standing.get("walk_speed_m_s", 0.) != 0. or
         standing.get("training_full_body", False) != training_full_body or
         standing.get("xbox_leg_waist_gain_scale") != 1. or standing["final_disabled_count"] != 31 or
+        standing["fingerprints"].get("imu_source") != fingerprints["imu_source"] or
         any(standing["fingerprints"][name] != fingerprints[name] for name in names)):
         raise ValueError("standing evidence must match the walking model, full gains and transmission")
     if not body_checkpoint:
@@ -316,6 +318,16 @@ def prepare(args, out, contract):
     return joint_hash
 
 
+def imu_capture(args, seconds, output):
+    if args.imu_backend == "spi":
+        if args.imu_can_interface:
+            raise ValueError("--imu-can-interface requires --imu-backend canfd")
+        return (["capture", "/dev/spidev0.0", "/dev/gpiochip0", "123", "800", seconds,
+                 output, "X_DOWN_Z_BACK", "CONFIGURE_ICM45686_RAW_NO_CAN"], {"backend": "spi"})
+    adapter = find_openimu(args.imu_can_interface)
+    return ["capture-canfd", adapter["interface"], seconds, output], adapter
+
+
 def run(args, out, mode):
     frames = int(args.duration * 50) + 1
     build = args.build.resolve()
@@ -357,6 +369,10 @@ def run(args, out, mode):
     fingerprints = {p.name: file_sha256(p) for p in (
         Path(__file__), model, args.icm, can_binary, actor_binary, out/"motors.tsv",
         out/"kinematics.tsv", out/"joints.tsv", out/"feedback.bin", out/"target.bin", out/"input.bin")}
+    imu_seconds = "360" if args.gamepad_control_device else "85" if args.walk_speed else "60" if args.sling_window else "35"
+    imu_command, fingerprints["imu_source"] = imu_capture(args, imu_seconds, out/"imu.csv")
+    if args.imu_backend == "canfd":
+        fingerprints["openimu_interface.py"] = file_sha256(Path(__file__).with_name("openimu_interface.py"))
     fingerprints['inference_cpu_frequency_khz'] = 1344000 if args.cpu_frequency_socket else 0
     if args.cpu_frequency_socket:
         for name in ('cpu_frequency_client.py','cpu_frequency_guard.py'):
@@ -397,7 +413,10 @@ def run(args, out, mode):
         raw = subprocess.check_output(["ip", "-j", "-d", "-s", "link", "show", "type", "can"])
         (out/name).write_bytes(raw)
         data = json.loads(raw)
-        for interface in interfaces:
+        checked_interfaces = list(interfaces)
+        if args.imu_backend == "canfd":
+            checked_interfaces.append(fingerprints["imu_source"]["interface"])
+        for interface in checked_interfaces:
             result = audit_socketcan_active_fd_snapshot(data, interface)
             if not result.passed:
                 raise RuntimeError(str(result.errors))
@@ -454,14 +473,14 @@ def run(args, out, mode):
             can_status = ["--sling-ready-fd", ready_read, "--operator-status-fd", status_write]
             actor_status = ["--sling-ready-fd", ready_write]
             can_fds, actor_fds = (ready_read, status_write), (ready_write,)
-        imu = launch("imu", ["taskset", "-c", "3", args.icm, "capture", "/dev/spidev0.0", "/dev/gpiochip0",
-            "123", "800", "360" if args.gamepad_control_device else "85" if args.walk_speed else "60" if args.sling_window else "35",
-            out/"imu.csv", "X_DOWN_Z_BACK", "CONFIGURE_ICM45686_RAW_NO_CAN"],
+        imu = launch("imu", ["taskset", "-c", "3", args.icm, *imu_command],
             env=dict(os.environ, ICM_IPC_SOCKET=str(imu_socket)))
         wait = time.monotonic()+25
         while "BIAS_READY" not in (out/"imu.log").read_text(errors="replace"):
             if imu.poll() is not None or time.monotonic()>wait:
-                raise RuntimeError("ICM did not pass its stationary calibration")
+                detail = (out/"imu.log").read_text(errors="replace").strip().splitlines()
+                reason = detail[-1] if detail else "no output from the IMU producer"
+                raise RuntimeError(f"{args.imu_backend} IMU failed stationary calibration: {reason}")
             time.sleep(.05)
         print("ICM_READY", flush=True)
         options = ["--policy-actuation"] if mode == "powered" else []
@@ -775,6 +794,8 @@ def run(args, out, mode):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--imu-backend", choices=("canfd", "spi"), default="canfd")
+    parser.add_argument("--imu-can-interface", help="select the OpenIMU PCAN-USB FD interface")
     parser.add_argument("--duration", type=int, choices=(2, 6, 10), default=2)
     for name in ("bundle", "hardware", "joint-limits", "build", "icm", "lock", "output"):
         parser.add_argument("--"+name, type=Path, required=True)

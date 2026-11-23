@@ -1,0 +1,44 @@
+{
+  "host": "Jetson 253",
+  "date": "2026-11-23",
+  "imu": {
+    "source": "OpenIMU ICM-45686 over PCAN-USB FD",
+    "usb_id": "0c72:0012",
+    "usb_port": "1-2.3",
+    "interface_during_powered_trials": "can3",
+    "mount": "X_DOWN_Z_BACK"
+  },
+  "after_remount": {
+    "capture": "battery-align-2g6vco7_",
+    "canfd_samples_in_comparison": 11811,
+    "spi_samples_in_comparison": 11801,
+    "canfd_mean_body_accel_m_s2": [-0.17604477, 0.10168262, 9.78183532],
+    "spi_mean_body_accel_m_s2": [-0.21813082, 0.08560919, 9.81573614],
+    "gravity_angle_deg": 0.26030025,
+    "observed_canfd_sensor_intervals_us": [1250]
+  },
+  "standing": {
+    "trial": "stand-8VJaWL",
+    "source": "powered/commissioning.json",
+    "passed": true,
+    "duration_s": 30.5,
+    "gain_scale": 1.0,
+    "max_feedback_to_target_accept_ms": 10.282853,
+    "sling_window_opened": true,
+    "motor_enable_attempts": 31,
+    "final_disabled_count": 31
+  },
+  "xbox": {
+    "trial": "trial-20261123-193212-sLLz",
+    "configured_control_window_s": 300,
+    "disabled_validation_passed": true,
+    "deadline_fault_validation_passed": true,
+    "motor_enable_attempts_during_each_validation": 0,
+    "full_gain_standing_checkpoint_time": "2026-11-23T19:40:30.673+08:00",
+    "actor_window_open_observed": true,
+    "operator_observation": "Walking behaved normally.",
+    "individual_disable_feedback_time": "2026-11-23T19:43:26.000+08:00",
+    "final_disabled_count_from_operator_log": 31,
+    "final_commissioning_report_retrieved": false
+  }
+}

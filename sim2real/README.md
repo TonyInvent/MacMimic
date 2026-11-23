@@ -10,7 +10,8 @@ The 100k MacMimic actor runs at 50 Hz against live joint and ICM45686 feedback. 
 | Extended | 120 s | +0.40 / −0.05 | ±0.10 | ±0.20 | [Powered pass](evidence/xbox120-commissioning.json) |
 | Wide | 120 s | +0.70 / −0.50 | ±0.42 | ±0.70 | [Powered pass](evidence/xbox120-wide-commissioning.json) |
 | Wide | 300 s | +0.70 / −0.50 | ±0.42 | ±0.70 | [Powered pass](evidence/xbox300-commissioning.json) |
-| Current checkout | 300 s | +0.70 / −0.50 | ±0.50 | ±0.70 | Left and right strafing confirmed on hardware. [Trial ended on feedback torque protection](evidence/xbox300-vy050-commissioning.json). |
+| Wide, SPI IMU | 300 s | +0.70 / −0.50 | ±0.50 | ±0.70 | Left and right strafing confirmed on hardware. [Trial ended on feedback torque protection](evidence/xbox300-vy050-commissioning.json). |
+| Wide, OpenIMU CAN FD | 300 s configured | +0.70 / −0.50 | ±0.50 | ±0.70 | Full-gain standing passed. Operator confirmed normal walking. All 31 drives reported disabled before the full window elapsed. [Battery test record](evidence/openimu-battery-validation.json) |
 
 These ranges are command limits. In the completed ±0.42 m/s trial the policy received lateral commands from −0.068 to +0.061 m/s and yaw commands from −0.70 to +0.70 rad/s. Measured lateral ground speed was not available. Hardware results apply to the robot, calibration and fingerprints recorded with each trial.
 
@@ -34,7 +35,7 @@ This file-only build runs the native and ICM tests, verifies the model bundle, a
 
 ## Commission on the prepared robot
 
-The operator entry uses the existing 253 commissioning lock, CPU-frequency lease service, Xbox joystick at `/dev/input/js0`, SPI IMU and four configured CAN interfaces. The CAN thread runs FIFO 50 on CPU 2. Inference uses CPU 4 and CPU 5 with RR 1 and a 1.344 GHz lease. An earlier trace found a 9.905 ms runnable wait on CPU 4 during a missed deadline. [Scheduler comparison](evidence/wakeup-ab-summary.json)
+The operator entry uses the existing 253 commissioning lock, CPU-frequency lease service, Xbox joystick at `/dev/input/js0`, an ICM-45686 and four motor CAN interfaces. The CAN thread runs FIFO 50 on CPU 2. Inference uses CPU 4 and CPU 5 with RR 1 and a 1.344 GHz lease. An earlier trace found a 9.905 ms runnable wait on CPU 4 during a missed deadline. [Scheduler comparison](evidence/wakeup-ab-summary.json)
 
 After a Jetson reboot, check the loaded KCAN module. The tested echo-order module has srcversion `404E8D65A6EFF60079EAEC1` on kernel `5.15.199-tegra`. The [253 loader](../scripts/load-kcan-253.sh) checks and loads the existing host-specific modules. The [driver patch and setup files](kcan/) record the change and bus configuration. The loader expects the candidate and rollback modules already installed on the commissioning host.
 
@@ -42,6 +43,7 @@ After a Jetson reboot, check the loaded KCAN module. The tested echo-order modul
 bash scripts/load-kcan-253.sh --check
 # If a reload is needed, with the drives disabled:
 sudo bash scripts/load-kcan-253.sh
+sudo python3 runtime/tools/openimu_interface.py --up
 bash scripts/xbox300-vy050-macmimic-253.sh --qualify
 ```
 
@@ -52,6 +54,26 @@ bash scripts/xbox300-vy050-macmimic-253.sh
 ```
 
 Other [253 launchers](../scripts/) and the [initial preflight and trace analysis](jetson253/) refer to their original commissioning directories. [Incremental patches](patches/) record the development sequence from upstream through the 100k port, Xbox 30 s, Xbox 120 s, wide range, Xbox 300 s and lateral ±0.50 m/s. The checkout already contains the final source. Trial reports retain their original hardware qualification fields and binary hashes. A fresh build must collect its own admission evidence.
+
+### IMU selection
+
+The current Xbox launcher defaults to `--imu-backend canfd`. It discovers the dedicated PCAN-USB FD adapter (USB ID `0c72:0012`) on each start. Use `--imu-can-interface IFACE` if multiple matching adapters are present. The setup command above configures that adapter at 1 Mbit/s arbitration and 5 Mbit/s data. To use the original SPI wiring, select `--imu-backend spi` for qualification and each subsequent run. Qualification records include the selected source. Both paths use the X-down/Z-back sensor mounting, 15-second stationary bias and the same policy IPC format.
+
+The OpenIMU board publishes a 16-byte CAN FD frame with standard ID `0x01`, a sensor timestamp and raw accelerometer, gyroscope and temperature readings. USB interface names can change when the KCAN driver reloads. During the battery test, the PCAN-USB FD at port `1-2.3` appeared as `can3`. The four motor channels appeared as `kcan1` through `kcan4` on a separate USB device. Reload the motor driver first, then bring up the OpenIMU interface. [OpenIMU firmware and frame format](https://github.com/TonyInvent/OpenIMU)
+
+To repeat the full-gain zero-speed check on the prepared robot, run `bash scripts/stand-openimu-253.sh` at the operator terminal. It runs the disabled and deadline-fault checks, then prompts for `STAND` before enabling the drives. For walking, run `bash scripts/xbox300-vy050-macmimic-253.sh` at the terminal. It checks the Xbox profile's qualification and prompts for `XBOX300`.
+
+For a standalone 60-second stationary capture, run the setup command above, read the interface name from its output and substitute it for `IFACE` below. This entry opens only the IMU socket. The CSV records the 16-bit sensor tick, monotonic kernel arrival and process read times, estimated sample time and raw counts. The sensor tick wraps every 65.536 ms. The estimate tracks excess delay relative to kernel arrivals. Absolute sensor-to-host latency needs an independent timing reference.
+
+```bash
+sim2real/build/jetson253/icm/sprite_icm45686 capture-canfd IFACE 60 openimu.csv
+```
+
+On Jetson 253, a 600-second stationary test collected 475,807 frames during recorded-input inference. Every adjacent sensor timestamp advanced by 1,250 µs. Host arrival rate averaged 793.01 Hz. Across 29,000 IPC reads, estimated sample age was 1.42 ms at p99 and 3.79 ms at maximum. The production policy client also accepted 3,000 consecutive snapshots in a separate 60-second window. [Stationary validation](evidence/openimu-stationary-validation.json)
+
+With the initial mount, the two IMUs' mean gravity directions differed by 2.67° at rest. During manual rotation their body-frame angular velocities had correlations of 0.9995, 0.9999 and 0.9974 on X, Y and Z. When the OpenIMU producer was frozen, the policy client rejected stale data after 29.74 ms. [Motion and fault tests](evidence/openimu-dynamic-validation.json)
+
+After OpenIMU was secured in its final position, the mean gravity directions differed by 0.26° using the same mounting rotation. On battery power the robot passed a 30.5-second, full-gain zero-command standing test. The subsequent Xbox trial passed its disabled and deadline-fault checks, entered the powered control window and walked normally according to the onsite operator. Individual motor feedback confirmed all 31 drives disabled about 175 seconds after the standing checkpoint. [Battery test record](evidence/openimu-battery-validation.json)
 
 ## Source and licensing
 
