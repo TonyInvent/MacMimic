@@ -9,7 +9,7 @@ Run from the repository root on an Apple silicon Mac with Git and uv installed. 
 ```sh
 uv sync --locked --extra opensprite
 mkdir -p data
-git clone https://github.com/BeijingDynamics/OpenSprite-SuperMimic.git data/OpenSprite-SuperMimic
+git clone https://github.com/TonyInvent/OpenSprite-SuperMimic.git data/OpenSprite-SuperMimic
 git -C data/OpenSprite-SuperMimic checkout --detach bc570e272f5ae07067d5c75c1c1b3051bf615b6a
 .venv/bin/python data/OpenSprite-SuperMimic/scripts/fetch_robot_assets.py
 mkdir -p logs/opensprite-release
@@ -26,13 +26,13 @@ For interactive simulation, pair an Xbox controller with macOS and run:
 
 Center both sticks, release LT, then hold LT to enable driving. Left-stick Y commands forward speed, right-stick X commands turning, and releasing LT commands a stop. The selected export includes its ONNX, input contract and local simulation measurements. See the [60-checkpoint comparison](opensprite-r1/evaluation/checkpoint_comparison.json).
 
-The separate [upstream release](https://github.com/BeijingDynamics/OpenSprite-SuperMimic/releases) used for comparison was unpacked on the training machine under `data/OpenSprite-SuperMimic/outputs/r1-mac/release/official_policy`. Its ONNX SHA-256 is `5695b6980746534a11d075befc29bf5f7fe0ef2a7d81e3dadf3147c50f4d6930`. To drive the upstream release in the same simulator:
+The separate [upstream release](https://github.com/TonyInvent/OpenSprite-SuperMimic/releases) used for comparison was unpacked on the training machine under `data/OpenSprite-SuperMimic/outputs/r1-mac/release/official_policy`. Its ONNX SHA-256 is `5695b6980746534a11d075befc29bf5f7fe0ef2a7d81e3dadf3147c50f4d6930`. To drive the upstream release in the same simulator:
 
 ```sh
 .venv/bin/mjpython tools/opensprite_control.py data/OpenSprite-SuperMimic/outputs/r1-mac/release/official_policy --xbox
 ```
 
-The official 6,000-update PyTorch checkpoint identifies the training bank as `edd4ddd6f54e8a8a710481d11340ac6e38d6b944e75613c48e318fc3b32d296f`. Its two clips at 50 Hz are `pm01_clearance_walk` (572 frames, 80% of resets) and `Neutral_ID_001135_001495_stand` (300 frames, 20%). The public release contains the final checkpoint and policy. The exact bank and transfer parent are separate inputs. See the [R1 model card](https://github.com/BeijingDynamics/OpenSprite-SuperMimic/blob/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/docs/SPRITE_SM_WALK_R1.md).
+The official 6,000-update PyTorch checkpoint identifies the training bank as `edd4ddd6f54e8a8a710481d11340ac6e38d6b944e75613c48e318fc3b32d296f`. Its two clips at 50 Hz are `pm01_clearance_walk` (572 frames, 80% of resets) and `Neutral_ID_001135_001495_stand` (300 frames, 20%). The public release contains the final checkpoint and policy. The exact bank and transfer parent are separate inputs. See the [R1 model card](https://github.com/TonyInvent/OpenSprite-SuperMimic/blob/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/docs/SPRITE_SM_WALK_R1.md).
 
 For retraining, obtain the exact reviewed bank from its owner and place `walk_stand.npz` in `data/OpenSprite-SuperMimic/outputs/r1-mac/original/`. The original standing medians are +4.3564° and −4.1396°. The separate local reconstruction is excluded. See the [reference provenance and fingerprints](opensprite-r1/reference.json).
 
@@ -67,7 +67,7 @@ caffeinate -is .venv/bin/python -u -m supermimic_mlx.train \
 
 ## Historical run002 port experiment
 
-This workspace uses the OpenSprite v5 asset and the five run002 source clips from [OpenSprite-SuperMimic](https://github.com/BeijingDynamics/OpenSprite-SuperMimic/tree/bc570e272f5ae07067d5c75c1c1b3051bf615b6a). The local checkout lives under `data/OpenSprite-SuperMimic`. Set `OPENSPRITE_REPO` if moving that checkout. Its 33 pinned STL meshes must be present.
+This workspace uses the OpenSprite v5 asset and the five run002 source clips from [OpenSprite-SuperMimic](https://github.com/TonyInvent/OpenSprite-SuperMimic/tree/bc570e272f5ae07067d5c75c1c1b3051bf615b6a). The local checkout lives under `data/OpenSprite-SuperMimic`. Set `OPENSPRITE_REPO` if moving that checkout. Its 33 pinned STL meshes must be present.
 
 ### Earlier run002 policy trained on this Mac
 

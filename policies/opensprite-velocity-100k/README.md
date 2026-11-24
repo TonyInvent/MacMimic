@@ -9,7 +9,7 @@ Keep `policy.onnx` and `contract.json` together. Verify the package from this di
 ```sh
 uv sync --locked --extra opensprite
 mkdir -p data
-git clone https://github.com/BeijingDynamics/OpenSprite-SuperMimic.git data/OpenSprite-SuperMimic
+git clone https://github.com/TonyInvent/OpenSprite-SuperMimic.git data/OpenSprite-SuperMimic
 git -C data/OpenSprite-SuperMimic checkout --detach bc570e272f5ae07067d5c75c1c1b3051bf615b6a
 .venv/bin/python data/OpenSprite-SuperMimic/scripts/fetch_robot_assets.py
 package=policies/opensprite-velocity-100k

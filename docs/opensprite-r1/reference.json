@@ -10,7 +10,7 @@
   "sources": [
     "https://github.com/BeijingDynamics/open_sprite_rl/blob/63a82f744c78d48ee42f557fb472d7499702ee94/assets/references/g71/sprite0825_pm01_g55_ik_contactclean_wbt_v1.npz",
     "https://theorangeduck.com/media/uploads/Geno/100style-retarget/bvh.zip",
-    "https://github.com/BeijingDynamics/OpenSprite-SuperMimic/blob/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/docs/REFERENCE_FUSION_CAMPAIGN_20261118.md"
+    "https://github.com/TonyInvent/OpenSprite-SuperMimic/blob/bc570e272f5ae07067d5c75c1c1b3051bf615b6a/docs/REFERENCE_FUSION_CAMPAIGN_20261118.md"
   ],
   "clips": [
     {
