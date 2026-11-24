@@ -50,6 +50,7 @@ struct GamepadSnapshot {
   double lt=0;
   bool disable_requested=false;
   double lateral=0;
+  bool button_map_fault=false;
 };
 class GamepadDisableCombo {
   bool lb_=false,rb_=false,lb_known_=false,rb_known_=false,ready_=false,latched_=false;

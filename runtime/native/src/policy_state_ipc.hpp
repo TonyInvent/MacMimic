@@ -1,5 +1,6 @@
 #pragma once
 #include "policy_protection.hpp"
+#include "operator_disable.hpp"
 #include <cstring>
 #include <cerrno>
 #include <limits>
@@ -89,6 +90,14 @@ public:
     void close_after_fault() noexcept {
         failed_=true;
         if(fd_>=0) { ::close(fd_);fd_=-1; }
+    }
+    void request_operator_disable() {
+        const auto& packet=operator_disable_packet;
+        const auto n=::send(fd_,packet.data(),packet.size(),MSG_DONTWAIT|MSG_NOSIGNAL);
+        close_after_fault();
+        if(n!=static_cast<ssize_t>(packet.size()))
+            throw std::runtime_error("Xbox disable IPC send failed; target channel closed");
+        throw std::runtime_error(operator_disable_reason);
     }
     PolicyStateChannel(const PolicyStateChannel&)=delete;
     PolicyStateChannel& operator=(const PolicyStateChannel&)=delete;

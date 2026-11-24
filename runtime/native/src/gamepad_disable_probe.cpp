@@ -1,8 +1,9 @@
 #include "policy_gamepad_linux.hpp"
 #include <iostream>
 int main(int argc,char** argv){
-  if(argc!=2)return 2;
-  sprite_policy::LinuxGamepad pad(argv[1]);
+  const bool kernel_map=argc==3 && std::string(argv[2])=="--kernel-map";
+  if(argc!=2 && !kernel_map)return 2;
+  sprite_policy::LinuxGamepad pad(argv[1],false,kernel_map);
   const auto begin=sprite_policy::gamepad_now();
   std::cout<<"NO CAN. Release LB/RB first, then hold BOTH continuously for3s. Timeout20s."<<std::endl;
   while(sprite_policy::gamepad_now()-begin<20000000000ULL){

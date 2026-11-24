@@ -55,6 +55,7 @@ OPERATOR_MESSAGES = {
     "DISABLE_UNCONFIRMED": "Could not confirm all 31 motors disabled. CUT MOTOR POWER.",
 }
 OPERATOR_MESSAGES.update({
+    "OPERATOR_DISABLE": "Xbox LB+RB held for three seconds. Disabling all drives; awaiting individual feedback.",
     "XBOX_READY": "Body stability check passed. Slacken the sling only if self-supported; retain fall protection. The 300-second Xbox window opens next.",
     "DRY_XBOX_READY": "Disabled validation: 300-second Xbox window opens next. Keep sling support.",
     "XBOX_END": "Xbox commands have returned to zero. Control is ending; retain fall protection.",
@@ -790,6 +791,7 @@ def run(args, out, mode):
                     timing_max_ms=timing_max_ms, deadline_stage=report.get("deadline_stage"),
                     velocity_command=None if (args.gamepad_preview_device or args.gamepad_control_device) else [args.walk_speed,0,0],
                     command_source="xbox_control" if args.gamepad_control_device else "xbox_preview" if args.gamepad_preview_device else "scripted",
+                    operator_disable_requested="OPERATOR_DISABLE" in operator_events,
                     motor_enable_attempts=enables,
                     final_disabled_count=disabled, fingerprints=fingerprints,
                     hardware_qualified=False, powered_walking_ready=False)

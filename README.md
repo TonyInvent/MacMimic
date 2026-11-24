@@ -12,6 +12,8 @@ The final Appendix G velocity policy trained on a 48 GB M4 Pro for 38 h 32 min. 
 
 OpenIMU streams raw accelerometer and gyroscope data over CAN FD at **800 Hz**. In the Jetson direct-read test, consecutive sensor timestamps were **1.25 ms** apart. After calibration, the runtime integrates each accepted frame using its sensor timestamp and publishes the updated attitude to shared memory. The **50 Hz** walking policy reads the latest estimate every 20 ms, after roughly 16 IMU updates. Across 803 read-only policy steps, the estimated age of the OpenIMU sample at inference was 0.64 ms at the median and 1.33 ms at p99. [Jetson timing measurements](sim2real/evidence/imu-direct-read-253-audit.json)
 
+During Xbox control, hold **LB + RB for three continuous seconds** to end the run and disable all 31 drives. Both IMU backends support the gesture. In a powered OpenIMU trial on Jetson 253, the controller received the operator request and confirmed all 31 drives disabled from individual feedback. [Powered stop record](sim2real/evidence/xbox-bumper-disable.json)
+
 [Download the ONNX + contract package](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-velocity-s49-it100000/opensprite-velocity-100k.zip) · [Sim-to-real interface and replay instructions](policies/opensprite-velocity-100k/README.md)
 
 Motion sources are [Ubisoft La Forge LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) and [BONES-SEED](https://huggingface.co/datasets/bones-studio/seed). Training data includes [Motion Data by Bones Studio](https://bones.studio/). Use of the underlying dataset is subject to the [BONES Motion Capture Dataset License Agreement](https://bones.studio/info/seed-license).

@@ -33,6 +33,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "sling_window.hpp"
+#include "operator_disable.hpp"
 #include "action_tx_trace.hpp"
 #include <linux/sockios.h>
 
@@ -938,6 +939,8 @@ void drain_target_packets(IpcSocket& ipc, std::uint64_t policy_joint_hash,
           std::to_string(receive_errno) + " " + std::strerror(receive_errno));
     }
     if (received == 0) throw std::runtime_error("policy IPC client disconnected");
+    if (strict && sprite_policy::is_operator_disable(&packet,received))
+      throw std::runtime_error(sprite_policy::operator_disable_reason);
     if (received != static_cast<ssize_t>(sizeof(packet)) ||
         std::memcmp(packet.magic, "SPRT", 4) != 0 || packet.version != kIpcVersion ||
         packet.kind != kTargetKind || packet.joint_order_hash != policy_joint_hash ||
@@ -2269,6 +2272,10 @@ int run_native_protected_policy(
     }
   } catch (const std::exception& error) {
     failure = error.what();
+    if (sling && failure == sprite_policy::operator_disable_reason) {
+      try { emit_status("OPERATOR_DISABLE\n"); }
+      catch (const std::exception&) { /* Continue to motor disable even if the status pipe fails. */ }
+    }
   }
 
   for (std::size_t index = 0; index < motors.size(); ++index) {

@@ -1,0 +1,20 @@
+{
+  "host": "Jetson 253",
+  "date": "2026-11-24",
+  "source_trial": "trial-UgRRs9/powered",
+  "source_reports": ["commissioning.json", "can.json"],
+  "imu_backend": "canfd",
+  "imu_interface": "spriteimu0",
+  "motor_enable_attempts": 31,
+  "operator_disable_requested": true,
+  "operator_events": [
+    "WAITING_FOR_ENABLE",
+    "POLICY_DIRECT",
+    "ENABLED_31",
+    "XBOX_READY",
+    "OPERATOR_DISABLE",
+    "DISABLED_31"
+  ],
+  "can_errors": ["Xbox operator disable request"],
+  "final_disabled_count": 31
+}

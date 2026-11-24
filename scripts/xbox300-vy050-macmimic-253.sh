@@ -1,5 +1,5 @@
 #!/bin/bash
-# Reuse matching no-enable qualification for the 300-second Xbox profile.
+# Start the 300-second Xbox profile using saved qualification for the selected IMU.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
 runtime="$repo/runtime"
@@ -36,7 +36,8 @@ unset SPRITE_INFERENCE_DIAGNOSTICS
 # CAN selects FIFO 50 on CPU 2. Only the two compute threads select RR 1.
 if [[ $(ulimit -r) != 50 ]]; then sudo prlimit --pid "$$" --rtprio=50:50; fi
 build/sprite_can_shadow --check-commissioning-scheduler 2
-mkdir -p qualification
+cache="$PWD/qualification/$imu_backend"
+mkdir -p "$cache"
 exec 9>qualification/operator.lock
 flock -n 9 || { echo "Another Xbox 300 session is active." >&2; exit 1; }
 output=$PWD
@@ -64,14 +65,21 @@ run_phase() {
 ensure_phase() {
   local phase=$1 evidence_flag=$2
   shift 2
-  local cached="$PWD/qualification/$phase"
-  if [[ -f $cached/commissioning.json ]] &&
-     run_phase check --check-saved-evidence "$evidence_flag" "$cached"; then
-    echo "Reusing $phase: $(readlink -f "$cached")"
-    return
+  local cached="$cache/$phase" candidate
+  # The powered process verifies both reports together before opening devices.
+  if [[ -z $operation && -f $cached/commissioning.json ]]; then
+    return 0
   fi
-  if [[ $operation == --check-cache ]]; then
-    echo "No matching saved $phase qualification." >&2
+  # Older launches kept a single cache for both IMUs. Recover matching trials.
+  for candidate in "$cached" "$PWD/qualification/$phase" "$PWD"/trial-*/"$phase"; do
+    [[ -f $candidate/commissioning.json ]] || continue
+    if run_phase check --check-saved-evidence "$evidence_flag" "$candidate"; then
+      ln -sfnT "$(readlink -f "$candidate")" "$cached"
+      return 0
+    fi
+  done
+  if [[ $operation != --qualify ]]; then
+    echo "Missing matching $imu_backend $phase evidence. Run --qualify for this IMU." >&2
     return 1
   fi
   new_output
@@ -86,7 +94,8 @@ echo "Command limits: forward +0.70, reverse -0.50, lateral +/-0.50 m/s; yaw +/-
 echo "Full-gain standing for 20 seconds after IMU calibration, then a 300-second Xbox input window."
 echo "Keep fall protection, clear the travel area, and keep the motor power cutoff within reach."
 echo "After XBOX_WINDOW_OPEN, center sticks, release LT, then hold LT to move. Releasing LT brakes."
+echo "Release LB and RB once, then hold both continuously for 3 seconds to end the run and disable all 31 drives."
 read -r -p "With the robot supported, stationary and drives disabled, type XBOX300 to start: " ready
 [[ $ready == XBOX300 ]] || exit 2
 new_output
-run_phase powered --enable-suspended --passed-disabled "$PWD/qualification/disabled" --passed-deadline-fault "$PWD/qualification/fault"
+run_phase powered --enable-suspended --passed-disabled "$cache/disabled" --passed-deadline-fault "$cache/fault"

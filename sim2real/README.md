@@ -47,11 +47,15 @@ sudo python3 runtime/tools/openimu_interface.py --up
 bash scripts/xbox300-vy050-macmimic-253.sh --qualify
 ```
 
-`--qualify` runs disabled transport and intentional deadline rejection with the same build. It saves each passing phase separately. `--check-cache` checks the saved evidence. For a powered trial use the following entry at the robot, with fall protection in place and the physical motor cutoff within reach. It checks the evidence again and waits for the operator to enter `XBOX300`.
+Use `--qualify` when a build or IMU lacks matching evidence. This option runs the disabled transport and intentional deadline rejection tests as needed. The launcher keeps separate records for CAN FD and SPI and can recover earlier records from the build's trial directories. Use `--check-cache` to validate saved records. For routine walking, run the launcher at the robot with fall protection in place and the motor cutoff within reach. Enter `XBOX300` to start the powered phase using the saved records. If a required record is missing, the launcher exits.
 
 ```bash
 bash scripts/xbox300-vy050-macmimic-253.sh
 ```
+
+During powered standing or walking with either IMU, hold Xbox LB and RB together for three continuous seconds to end the run and disable all 31 drives. Start with both bumpers released. Releasing either bumper before three seconds resets the timer. The buttons work with LT released and the sticks in any position. The controller reports the request immediately and confirms shutdown only after individual drive feedback. An operator stop is recorded as an interrupted trial.
+
+In the powered OpenIMU trial on Jetson 253, the controller recorded `XBOX_READY`, then `OPERATOR_DISABLE`, then `DISABLED_31`. All 31 drives reported disabled. [Powered stop record](evidence/xbox-bumper-disable.json)
 
 Other [253 launchers](../scripts/) and the [initial preflight and trace analysis](jetson253/) refer to their original commissioning directories. [Incremental patches](patches/) record the development sequence from upstream through the 100k port, Xbox 30 s, Xbox 120 s, wide range, Xbox 300 s and lateral ±0.50 m/s. The checkout already contains the final source. Trial reports retain their original hardware qualification fields and binary hashes. A fresh build must collect its own admission evidence.
 

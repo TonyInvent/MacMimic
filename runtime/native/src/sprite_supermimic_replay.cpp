@@ -223,7 +223,7 @@ int main(int argc,char** argv) {
     }
     sprite_policy::GamepadCommand gamepad_command(gamepad_config);
     if(!gamepad_preview_device.empty())gamepad_preview=std::make_unique<sprite_policy::LinuxGamepad>(gamepad_preview_device,macmimic_100k);
-    if(!gamepad_control_device.empty())gamepad_preview=std::make_unique<sprite_policy::LinuxGamepad>(gamepad_control_device,macmimic_100k);
+    if(!gamepad_control_device.empty())gamepad_preview=std::make_unique<sprite_policy::LinuxGamepad>(gamepad_control_device,macmimic_100k,true);
 #endif
     const std::uint32_t endian=1;
     if(*reinterpret_cast<const char*>(&endian)!=1)throw std::runtime_error("little endian required");
@@ -417,6 +417,8 @@ int main(int argc,char** argv) {
       }
       if(gamepad_preview) {
         const auto source=gamepad_preview->snapshot();
+        if(source.button_map_fault)throw std::runtime_error("Xbox disable buttons unavailable");
+        if(!gamepad_control_device.empty() && source.disable_requested)channel.request_operator_disable();
         const auto now=sprite_policy::gamepad_now();
         const bool allowed=gamepad_control_device.empty()?i>0:gamepad_window.allowed(i,source,now);
         const auto command=gamepad_command.sample(source,now,allowed);
