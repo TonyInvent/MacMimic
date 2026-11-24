@@ -36,7 +36,7 @@ inline int isolate_compute(const std::vector<int>& before,int threads) {
 }
 inline void verify_and_save(const std::string& path,int ort,int expected_io) {
   std::ofstream out(path+".affinity.json");int io=0;
-  out<<"{\"main_cpu\":4,\"ort_worker_cpu\":"<<(ort?5:-1)<<",\"inference_threads\":"<<(ort?2:1)<<",\"io_cpu\":1,\"threads\":[";
+  out<<"{\"main_cpu\":4,\"ort_worker_cpu\":"<<(ort?5:-1)<<",\"inference_threads\":"<<(ort?2:1)<<",\"io_cpu\":"<<(expected_io?1:-1)<<",\"threads\":[";
   bool first=true;
   for(int tid:tids()) {
     const int wanted=tid==getpid()?4:tid==ort?5:1;

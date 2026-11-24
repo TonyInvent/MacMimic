@@ -125,6 +125,7 @@ int main(int argc,char** argv) {
     bool paced=false,diagnose_inference=false,isolated_inference=false,no_ort_spinning=false;int threads=1,warmup=50;
 #ifdef SPRITE_SUPERMIMIC_STATE_IPC
     std::string state_socket,imu_socket,feedback_config,imu_kind="software";
+    int imu_latest_fd=-1;
 #endif
 #ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
     std::string target_config;
@@ -165,6 +166,12 @@ int main(int argc,char** argv) {
       }
 #endif
 #ifdef SPRITE_SUPERMIMIC_STATE_IPC
+      else if(option=="--imu-latest-fd" && i+1<argc) {
+        const std::string value=argv[++i];
+        std::size_t used=0;
+        imu_latest_fd=std::stoi(value,&used);
+        if(used!=value.size() || imu_latest_fd<3)throw std::runtime_error("invalid IMU snapshot fd");
+      }
       else if((option=="--state-socket" || option=="--imu-socket" || option=="--feedback-config" || option=="--imu-kind") && i+1<argc) {
         const std::string value=argv[++i];
         if(option=="--state-socket")state_socket=value;
@@ -181,8 +188,9 @@ int main(int argc,char** argv) {
     }
     if(threads<1 || threads>8 || warmup<0 || warmup>1000)throw std::runtime_error("option out of bounds");
 #ifdef SPRITE_SUPERMIMIC_STATE_IPC
-    if(state_socket.empty() || imu_socket.empty() || feedback_config.empty() || paced)
+    if(state_socket.empty() || (imu_socket.empty() == (imu_latest_fd<0)) || feedback_config.empty() || paced)
       throw std::runtime_error("state IPC requires state/IMU/config and producer pacing");
+    if(imu_latest_fd>=0 && imu_kind!="icm")throw std::runtime_error("IMU snapshot requires ICM packets");
     if(imu_kind!="software" && imu_kind!="icm")throw std::runtime_error("IMU kind must be software or icm");
 #endif
 #ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
@@ -308,10 +316,11 @@ int main(int argc,char** argv) {
     if(feedback_file.peek()!=std::char_traits<char>::eof())throw std::runtime_error("trailing feedback configuration");
     for(double v:feedback.motor_zero)if(!std::isfinite(v))throw std::runtime_error("nonfinite feedback zero");
     for(double v:feedback.motor_to_joint)if(!std::isfinite(v))throw std::runtime_error("nonfinite feedback matrix");
-    sprite_policy::NativeImuClient imu(imu_socket,true,imu_kind=="icm");
-    if(isolated_inference)imu.pin_worker(1);
+    auto imu = imu_latest_fd>=0 ? sprite_policy::NativeImuClient(imu_latest_fd)
+                                : sprite_policy::NativeImuClient(imu_socket,true,imu_kind=="icm");
+    if(isolated_inference && imu_latest_fd<0)imu.pin_worker(1);
     if(isolated_inference) {
-      int io_threads=1;
+      int io_threads=imu_latest_fd<0 ? 1 : 0;
 #ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
       if(gamepad_preview)++io_threads;
 #endif

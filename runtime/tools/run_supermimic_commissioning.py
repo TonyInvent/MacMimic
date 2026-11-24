@@ -437,7 +437,7 @@ def run(args, out, mode):
     relay = None
     cpu_lease = None
     cpu_frequency = dict(requested_khz=1344000 if args.cpu_frequency_socket else None)
-    imu_socket, state_socket = out/"imu.sock", out/"state.sock"
+    state_socket = out/"state.sock"
     def launch(name, command, **kwargs):
         with (out/(name+".log")).open("wb") as log:
             process = subprocess.Popen([str(x) for x in command], stdout=log, stderr=subprocess.STDOUT, **kwargs)
@@ -473,8 +473,13 @@ def run(args, out, mode):
             can_status = ["--sling-ready-fd", ready_read, "--operator-status-fd", status_write]
             actor_status = ["--sling-ready-fd", ready_write]
             can_fds, actor_fds = (ready_read, status_write), (ready_write,)
+        imu_env = os.environ.copy()
+        imu_fd = os.memfd_create("opensprite-imu", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        pipe_fds.add(imu_fd)
+        imu_env.pop("ICM_IPC_SOCKET", None)
+        imu_env["ICM_LATEST_FD"] = str(imu_fd)
         imu = launch("imu", ["taskset", "-c", "3", args.icm, *imu_command],
-            env=dict(os.environ, ICM_IPC_SOCKET=str(imu_socket)))
+                     env=imu_env, pass_fds=(imu_fd,))
         wait = time.monotonic()+25
         while "BIAS_READY" not in (out/"imu.log").read_text(errors="replace"):
             if imu.poll() is not None or time.monotonic()>wait:
@@ -534,10 +539,10 @@ def run(args, out, mode):
             policy="SCHED_FIFO", priority=os.sched_getparam(can.pid).sched_priority,
             actor_cpus=list(ACTOR_CPUS), verified_before_actor_connection=True),indent=2))
         actor = launch("actor", ["taskset", "-c", ",".join(map(str,ACTOR_CPUS)), actor_binary, model, out/"input.bin", out/"native.bin",
-            "--threads", os.environ.get("SPRITE_INFERENCE_THREADS","2"), "--isolated-inference", *(["--no-ort-spinning"] if os.environ.get("SPRITE_NO_ORT_SPINNING")=="1" else []), *(["--diagnose-inference"] if os.environ.get("SPRITE_INFERENCE_DIAGNOSTICS")=="1" else []), "--warmup", "100", "--state-socket", state_socket, "--imu-socket", imu_socket,
+            "--threads", os.environ.get("SPRITE_INFERENCE_THREADS","2"), "--isolated-inference", *(["--no-ort-spinning"] if os.environ.get("SPRITE_NO_ORT_SPINNING")=="1" else []), *(["--diagnose-inference"] if os.environ.get("SPRITE_INFERENCE_DIAGNOSTICS")=="1" else []), "--warmup", "100", "--state-socket", state_socket, "--imu-latest-fd", imu_fd,
             "--feedback-config", out/"feedback.bin", "--target-config", out/"target.bin",
             "--imu-kind", "icm", *(["--macmimic-100k"] if macmimic else []), *tracking, *xbox_full, *full_body, *direct, *walking, *actor_status, *gamepad_preview],
-            pass_fds=actor_fds + ((cpu_lease.fileno(),) if cpu_lease else ()))
+            pass_fds=actor_fds + (imu_fd,) + ((cpu_lease.fileno(),) if cpu_lease else ()))
         for fd in actor_fds:
             close_pipe(fd)
         if args.gamepad_preview_device:
@@ -756,8 +761,10 @@ def run(args, out, mode):
                 operator_message(args.operator_status, OPERATOR_MESSAGES["DISABLE_UNCONFIRMED"])
     affinity_path = out/"native.bin.affinity.json"
     inference_affinity = json.loads(affinity_path.read_text()) if affinity_path.exists() else {}
+    has_io_worker = args.gamepad_control_device or args.gamepad_preview_device
     if not (inference_affinity.get("verified") is True and inference_affinity.get("main_cpu") == 4
-            and inference_affinity.get("ort_worker_cpu") == (-1 if os.environ.get("SPRITE_INFERENCE_THREADS")=="1" else 5) and inference_affinity.get("io_cpu") == 1):
+            and inference_affinity.get("ort_worker_cpu") == (-1 if os.environ.get("SPRITE_INFERENCE_THREADS")=="1" else 5)
+            and inference_affinity.get("io_cpu") == (1 if has_io_worker else -1)):
         failure = failure or "verified inference thread layout evidence missing"
     passed = not failure and disabled == 31 and enables == (31 if mode == "powered" else 0)
     leg_waist_gain_scale = .20 if args.tracked_startup else GAIN

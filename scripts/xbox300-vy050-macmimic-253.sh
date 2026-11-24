@@ -42,7 +42,7 @@ flock -n 9 || { echo "Another Xbox 300 session is active." >&2; exit 1; }
 output=$PWD
 new_output() {
   if [[ $output == "$PWD" ]]; then
-    output=$(mktemp -d "$PWD/trial-$(date +%Y%m%d-%H%M%S)-XXXX")
+    output=$(mktemp -d "$PWD/trial-XXXXXX")
     echo "Evidence: $output"
   fi
 }

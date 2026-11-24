@@ -1,6 +1,8 @@
 #pragma once
 #include "icm_packet.hpp"
+#include "imu_latest.hpp"
 #include <atomic>
+#include <optional>
 #include <mutex>
 #include <thread>
 #include <string>
@@ -10,6 +12,7 @@
 #include <unistd.h>
 
 class IcmServer {
+  std::optional<sprite_imu::LatestImu> shared_;
   int fd_=-1;
   std::string path_;
   std::atomic<bool> stop_{false};
@@ -31,7 +34,13 @@ class IcmServer {
     }
   }
 public:
-  explicit IcmServer(const char* path) {
+  explicit IcmServer(const char* path, const char* latest_fd = nullptr) {
+    if (latest_fd) {
+      size_t used = 0;
+      const int fd = std::stoi(latest_fd, &used);
+      if (fd < 3 || latest_fd[used] != '\0') throw std::runtime_error("invalid ICM_LATEST_FD");
+      shared_.emplace(fd, sprite_imu::LatestImu::Access::publish);
+    }
     if(!path || !*path)return;
     sockaddr_un a{};a.sun_family=AF_UNIX;
     if(std::strlen(path)>=sizeof(a.sun_path))throw std::runtime_error("ICM socket path too long");
@@ -46,5 +55,16 @@ public:
     catch(...) {::close(fd_);::unlink(path);throw;}
   }
   ~IcmServer(){stop_=true;if(worker_.joinable())worker_.join();if(fd_>=0)::close(fd_);if(!path_.empty())::unlink(path_.c_str());}
-  void publish(const sprite_imu::Packet& p){if(fd_<0)return;std::lock_guard<std::mutex> lock(mutex_);latest_=p;ready_=true;}
+  void publish(const sprite_imu::Packet& p) {
+    if (shared_) shared_->publish(p);
+    if (fd_<0) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    latest_=p;ready_=true;
+  }
+  void invalidate() {
+    if (shared_) shared_->invalidate();
+    if (fd_<0) return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    ready_=false;
+  }
 };

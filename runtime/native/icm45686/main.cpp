@@ -123,7 +123,7 @@ int main(int argc,char** argv) {
     if(pm_mode!="on")throw std::runtime_error("SPI0 runtime PM must be on; run runtime/tools/install_icm_spi_performance.sh once with sudo");
     std::cout<<"SPI_RUNTIME_PM=on (not restored to auto on exit)\n";
     Fd edge(gpio(argv[3],unsigned(std::stoul(argv[4]))));
-    IcmServer server(std::getenv("ICM_IPC_SOCKET"));
+    IcmServer server(std::getenv("ICM_IPC_SOCKET"), std::getenv("ICM_LATEST_FD"));
     icm::configure(d,rate);configured=true;
     std::signal(SIGINT,stop);std::signal(SIGTERM,stop);
     sprite_imu::StaticBias bias;sprite_imu::SixAxis estimator;bool ready=false;
@@ -131,7 +131,7 @@ int main(int argc,char** argv) {
     std::cout<<"KEEP STILL for first 15 seconds. Rate="<<rate<<" total seconds="<<seconds<<std::endl;
     try {
       while(!stopped && now()-begin<uint64_t(seconds*1e9)) {
-        pollfd p{edge.fd,POLLIN,0};int rc=poll(&p,1,100);
+        pollfd p{edge.fd,POLLIN,0};int rc=poll(&p,1,last_seq ? 30 : 100);
         if(rc<0 && errno==EINTR)continue;
         if(rc<=0 || (p.revents&(POLLERR|POLLHUP|POLLNVAL)))throw std::runtime_error("DRDY timeout/error");
         gpio_v2_line_event ev{},next{};
@@ -154,9 +154,10 @@ int main(int argc,char** argv) {
           ++late;if(end-last_good>30000000)throw std::runtime_error("SPI acquisition has no fresh sample for 30ms");continue;
         }
         auto a=icm::body(icm::accel(raw)),w=icm::body(icm::gyro(raw));
-        if(!ready) {
+        const bool calibrating = !ready;
+        if(calibrating) {
           bias.add(a,w,ev.timestamp_ns);
-          if(bias.ready()) {estimator.initialize(bias.acceleration(),bias.bias(),ev.timestamp_ns);ready=true;std::cout<<"BIAS_READY: movement may begin"<<std::endl;}
+          if(bias.ready()) {estimator.initialize(bias.acceleration(),bias.bias(),ev.timestamp_ns);ready=true;}
         } else estimator.update(a,w,ev.timestamp_ns);
         rows.push_back({ev.timestamp_ns,start,end,ev.seqno,raw,a,ready?estimator.corrected_gyro(w):w,ready?estimator.up():sprite_imu::Vec3{},ready?estimator.quaternion():std::array<double,4>{},ready});
         if(ready && std::getenv("ICM_VIEW_STDOUT") && rows.size()%16==0) {
@@ -168,11 +169,13 @@ int main(int argc,char** argv) {
           std::array<std::int16_t,6> counts{};
           for(unsigned i=0;i<3;++i){counts[i]=raw.accel_data[i];counts[3+i]=raw.gyro_data[i];}
           server.publish(sprite_imu::encode_icm(counts,icm::body(bias.bias()),estimator.quaternion(),ev.seqno,ev.timestamp_ns,end));
+          if(calibrating) std::cout<<"BIAS_READY: movement may begin"<<std::endl;
         }
         last_good=end;
       }
       if(!ready)throw std::runtime_error("stationary bias incomplete");
-    } catch(...) {try{icm::write(d,INT1_CONFIG0,0);}catch(...){}throw;}
+    } catch(...) {server.invalidate();try{icm::write(d,INT1_CONFIG0,0);}catch(...){}throw;}
+    server.invalidate();
     icm::write(d,INT1_CONFIG0,0);
   } catch(const std::exception& e){error=e.what();std::cerr<<error<<'\n';}
   if(!output.empty() && configured) {

@@ -57,7 +57,7 @@ int capture_openimu(int argc, char** argv) {
   if (!access(argv[4], F_OK)) throw std::runtime_error("capture file already exists");
   Receiver socket;
   socket.bind_interface(argv[2]);
-  IcmServer server(std::getenv("ICM_IPC_SOCKET"));
+  IcmServer server(std::getenv("ICM_IPC_SOCKET"), std::getenv("ICM_LATEST_FD"));
   std::ofstream csv(argv[4]);
   if (!csv) throw std::runtime_error("cannot open OpenIMU capture file");
   csv << "kernel_rx_ns,read_ns,estimated_sample_ns,sensor_tick_us,raw_ax,raw_ay,raw_az,raw_gx,raw_gy,raw_gz,raw_temp\n";
@@ -111,12 +111,12 @@ int capture_openimu(int argc, char** argv) {
       const auto estimated = timeline.update(sample.tick, rx, now);
       const auto a = icm::body(icm::accel(sample.raw)), w = icm::body(icm::gyro(sample.raw));
       rows.push_back({rx, now, estimated, sample});
-      if (!ready) {
+      const bool calibrating = !ready;
+      if (calibrating) {
         bias.add(a, w, timeline.sensor_ns);
         if (!bias.ready() || now-mono_anchor < 15000000000ULL) continue;
         filter.initialize(bias.acceleration(), bias.bias(), timeline.sensor_ns);
         ready = true;
-        std::cout << "BIAS_READY: movement may begin" << std::endl;
       } else {
         filter.update(a, w, timeline.sensor_ns);
       }
@@ -125,11 +125,14 @@ int capture_openimu(int argc, char** argv) {
         counts[i] = sample.raw.accel_data[i];
         counts[3+i] = sample.raw.gyro_data[i];
       }
-      server.publish(sprite_imu::encode_icm(counts, icm::body(bias.bias()), filter.quaternion(),
-                                            rows.size(), estimated, now));
+      const auto packet = sprite_imu::encode_icm(counts, icm::body(bias.bias()), filter.quaternion(),
+                                                 rows.size(), estimated, now);
+      server.publish(packet);
+      if (calibrating) std::cout << "BIAS_READY: movement may begin" << std::endl;
     }
     if (!ready) throw std::runtime_error("OpenIMU stationary bias incomplete");
   } catch (const std::exception& e) { error = e.what(); }
+  server.invalidate();
   for (const auto& r : rows) {
     csv << r.rx << ',' << r.read << ',' << r.estimated << ',' << r.sample.tick;
     for (auto v : r.sample.raw.accel_data) csv << ',' << v;

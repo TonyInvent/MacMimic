@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
-# Full-gain zero-command OpenIMU standing on the prepared Jetson.
+# Full-gain zero-command standing with the selected ICM-45686 backend.
 set -euo pipefail
+imu_backend=canfd
+imu_options=()
+while (($#)); do
+  case "$1" in
+    --imu-backend) [[ ${2:-} == canfd || ${2:-} == spi ]] || exit 2; imu_backend=$2; shift ;;
+    --imu-can-interface) [[ -n ${2:-} ]] || exit 2; imu_options+=(--imu-can-interface "$2"); shift ;;
+    *) echo "Usage: $0 [--imu-backend canfd|spi] [--imu-can-interface IFACE]" >&2; exit 2 ;;
+  esac
+  shift
+done
+[[ $imu_backend == canfd || ${#imu_options[@]} == 0 ]] || exit 2
 repo=$(cd "$(dirname "$0")/.." && pwd)
 runtime="$repo/runtime"
 hardware="$repo/sim2real/hardware"
@@ -30,7 +41,7 @@ run_phase() {
   "$python" -u "$runtime/tools/run_supermimic_commissioning.py" \
     --runtime-root "$runtime" --bundle "$repo/policies/opensprite-velocity-100k" \
     --hardware "$hardware/hardware.json" --joint-limits "$hardware/joint-limits.json" \
-    --build "$PWD/build" --icm "$PWD/icm/sprite_icm45686" --imu-backend canfd \
+    --build "$PWD/build" --icm "$PWD/icm/sprite_icm45686" --imu-backend "$imu_backend" "${imu_options[@]}" \
     --lock /home/tony/supermimic-run002-20261106/commissioning.lock --output "$out/$phase" \
     --tracked-startup "$hardware/reviewed-profile" --training-full-body --direct-policy-start \
     --coherent-action-send --sling-window --operator-status "$out/$phase-operator.log" \

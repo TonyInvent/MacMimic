@@ -1,6 +1,8 @@
 #pragma once
 #include "inference_cpu_layout.hpp"
 #include "imu_packet.hpp"
+#include "imu_latest.hpp"
+#include <optional>
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -75,6 +77,8 @@ class NativeImuClient {
     std::thread worker_;
     std::mutex mutex_;
     ImuSnapshot latest_;
+    std::optional<sprite_imu::LatestImu> direct_;
+    std::uint64_t previous_direct_ = 0;
     bool software_fusion_=false;
     bool icm_=false;
     void cleanup() noexcept {
@@ -109,6 +113,7 @@ class NativeImuClient {
         }
     }
 public:
+    explicit NativeImuClient(int fd) : direct_(std::in_place,fd,sprite_imu::LatestImu::Access::read) {}
     explicit NativeImuClient(const std::string& server,bool software_fusion=false,bool icm=false):software_fusion_(software_fusion),icm_(icm) {
         try {
             auto peer=address(server);
@@ -129,6 +134,13 @@ public:
     ~NativeImuClient() { stop_=true;if(worker_.joinable())worker_.join();cleanup(); }
     void pin_worker(int cpu) { sprite_schedule::pin_thread(worker_.native_handle(),cpu); }
     bool snapshot(ImuSnapshot& result) {
+        if (direct_) {
+            sprite_imu::Packet packet;
+            if (!direct_->read(packet)) return false;
+            result=validate_imu_packet(packet.data(),packet.size(),monotonic_ns(),previous_direct_,false,true);
+            previous_direct_=result.sequence;
+            return true;
+        }
         std::lock_guard<std::mutex> lock(mutex_);
         if (!error_.empty()) throw std::runtime_error(error_);
         if (!latest_.sequence) return false;

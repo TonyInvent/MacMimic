@@ -1,0 +1,96 @@
+{
+  "spi": {
+    "normal": {
+      "frames": 803,
+      "imu_age_ms": {
+        "mean": 0.741830537983,
+        "p50": 0.730694,
+        "p95": 1.312187,
+        "p99": 1.370849,
+        "max": 1.429126
+      },
+      "affinity": {
+        "main_cpu": 4,
+        "ort_worker_cpu": 5,
+        "inference_threads": 2,
+        "io_cpu": -1,
+        "threads": [
+          {
+            "tid": 5920,
+            "cpu": 4
+          },
+          {
+            "tid": 5921,
+            "cpu": 5
+          }
+        ],
+        "verified": true
+      }
+    },
+    "freeze": {
+      "error": "IMU stale/future timestamp",
+      "observed_exit_after_stop_ms": 68.63
+    },
+    "producer_fault": "SPI acquisition has no fresh sample for 30ms",
+    "host_rate_hz": 791.882,
+    "median_host_gap_us": 1262.394,
+    "spi_capture": {
+      "no_can": true,
+      "rate_hz": 800,
+      "samples": 25498,
+      "missed_sequence_events": 56,
+      "coalesced_events": 56,
+      "late_samples_discarded": 6,
+      "max_spi_ns": 873012,
+      "max_edge_to_read_end_ns": 1128396,
+      "max_sample_gap_ns": 5052424,
+      "completed": false,
+      "hardware_qualified": false
+    }
+  },
+  "canfd": {
+    "normal": {
+      "frames": 803,
+      "imu_age_ms": {
+        "mean": 0.65637816812,
+        "p50": 0.644892,
+        "p95": 1.254099,
+        "p99": 1.325555,
+        "max": 1.785342
+      },
+      "affinity": {
+        "main_cpu": 4,
+        "ort_worker_cpu": 5,
+        "inference_threads": 2,
+        "io_cpu": -1,
+        "threads": [
+          {
+            "tid": 5926,
+            "cpu": 4
+          },
+          {
+            "tid": 5927,
+            "cpu": 5
+          }
+        ],
+        "verified": true
+      }
+    },
+    "freeze": {
+      "error": "IMU stale/future timestamp",
+      "observed_exit_after_stop_ms": 93.56
+    },
+    "producer_fault": "stale OpenIMU kernel RX timestamp",
+    "host_rate_hz": 792.864,
+    "median_host_gap_us": 1261.043,
+    "sensor_interval_us": [
+      1250
+    ]
+  },
+  "motor_tx_delta": [
+    0,
+    0,
+    0,
+    0
+  ]
+}
