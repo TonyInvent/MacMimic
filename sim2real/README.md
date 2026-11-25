@@ -59,6 +59,10 @@ In the powered OpenIMU trial on Jetson 253, the controller recorded `XBOX_READY`
 
 Other [253 launchers](../scripts/) and the [initial preflight and trace analysis](jetson253/) refer to their original commissioning directories. [Incremental patches](patches/) record the development sequence from upstream through the 100k port, Xbox 30 s, Xbox 120 s, wide range, Xbox 300 s and lateral ±0.50 m/s. The checkout already contains the final source. Trial reports retain their original hardware qualification fields and binary hashes. A fresh build must collect its own admission evidence.
 
+### Disco Point on Jetson 253
+
+The [实验室 Codex 交接说明](DISCO_POINT_LAB_HANDOFF.md) lists the 1,640-frame policy, native runtime changes and acceptance checks for the first powered trial.
+
 ### Standing groove on Jetson 253
 
 The dedicated `scripts/standing-groove-253.sh` launcher defaults to offline replay. It uses the protected actor binary to compare all 600 frames and 31 raw actions per frame with the packaged MLX reference. A second pass rebuilds each ten-frame history from the current recorded state and the native actor's own preceding raw action. Both passes use the release tolerances of `atol=rtol=2e-4`. The report is saved as `sim2real/build/jetson253/groove-native-600.json`.
