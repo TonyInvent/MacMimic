@@ -32,6 +32,9 @@ CAN_REALTIME_PRIORITY = 50
 ACTOR_CPUS = (4, 5)
 SLING_DURATION = 30.5
 XBOX_DURATION = 326.0
+GROOVE_START = 1002
+GROOVE_END = GROOVE_START + 600
+GROOVE_DURATION = 36.5
 WALK_DURATION = 49.5
 SLING_COUNTDOWN = [f"COUNTDOWN_{seconds}" for seconds in range(9, 0, -1)]
 INTERNAL_OPERATOR_EVENTS = {"ENABLED_31", "DRY_ENABLE_NOTICE"}
@@ -55,6 +58,9 @@ OPERATOR_MESSAGES = {
     "DISABLE_UNCONFIRMED": "Could not confirm all 31 motors disabled. CUT MOTOR POWER.",
 }
 OPERATOR_MESSAGES.update({
+    "GROOVE_READY": "Standing checkpoint passed. Starting the 12-second groove; retain sling support.",
+    "DRY_GROOVE_READY": "Disabled validation: starting the 600-frame groove.",
+    "GROOVE_END": "Choreography finished. Returning to zero-command standing before disable.",
     "OPERATOR_DISABLE": "Xbox LB+RB held for three seconds. Disabling all drives; awaiting individual feedback.",
     "XBOX_READY": "Body stability check passed. Slacken the sling only if self-supported; retain fall protection. The 300-second Xbox window opens next.",
     "DRY_XBOX_READY": "Disabled validation: 300-second Xbox window opens next. Keep sling support.",
@@ -222,7 +228,7 @@ def verify_walk_commands(commands, speed):
         raise RuntimeError("recorded actor commands differ from the bounded walking profile")
 
 
-def verify_direct_start(records, feedback, trace, contract):
+def verify_direct_start(records, feedback, trace, contract, groove=False):
     """One non-policy handshake, then fresh ten-frame history and unblended actions."""
     if len(records) < 2 or len(trace) != len(records) or len(feedback) != len(records):
         raise ValueError("direct-start trace incomplete")
@@ -241,6 +247,12 @@ def verify_direct_start(records, feedback, trace, contract):
         x = np.minimum(np.arange(1, len(records)) / 100., 1.)[:, None]
         alpha = x*x*(3.-2.*x)
         goal = feedback[1, :31] + alpha * (goal - feedback[1, :31])
+        if groove:
+            # Return to the standing actor with a fresh two-second pose handoff.
+            post = slice(GROOVE_END-1, None)
+            x = np.minimum(np.arange(1, len(records)-GROOVE_END+1) / 100., 1.)[:, None]
+            alpha = x*x*(3.-2.*x)
+            goal[post] = feedback[GROOVE_END, :31] + alpha * (goal[post] - feedback[GROOVE_END, :31])
     if not np.allclose(records['target'][1:], goal, rtol=0, atol=1e-12):
         raise ValueError("direct start retained policy target interpolation")
 
@@ -342,6 +354,7 @@ def run(args, out, mode):
     if macmimic and not (args.direct_policy_start and args.training_full_body):
         raise ValueError("MacMimic requires fresh history and all training gains")
     model = checked_model(contract)
+    source = "standing_groove" if args.standing_groove else "xbox_control" if args.gamepad_control_device else "scripted"
     if file_sha256(args.hardware) != HARDWARE_SHA or file_sha256(args.joint_limits) != LIMITS_SHA:
         raise ValueError("commissioning hardware or joint limits identity changed")
     joint_hash = prepare(args, out, contract)
@@ -372,6 +385,15 @@ def run(args, out, mode):
         out/"kinematics.tsv", out/"joints.tsv", out/"feedback.bin", out/"target.bin", out/"input.bin")}
     imu_seconds = "360" if args.gamepad_control_device else "85" if args.walk_speed else "60" if args.sling_window else "35"
     imu_command, fingerprints["imu_source"] = imu_capture(args, imu_seconds, out/"imu.csv")
+    if args.standing_groove:
+        from verify_standing_groove import binding, check
+        fingerprints.update(binding(args.standing_groove))
+        choreography = json.loads((args.standing_groove/"standing_groove_contract.json").read_text())
+        if (not macmimic or contract.data["action_offset"] != choreography["default_joint_pos"] or
+            any(contract.data[k] != choreography[k] for k in ("default_joint_pos","action_scale","joint_names","control_profile_sha256"))):
+            raise ValueError("Standing and groove joint order, affine map or training gains differ")
+        if not args.check_saved_evidence:
+            check(args.standing_groove, actor_binary, out/"groove-native-replay.json")
     if args.imu_backend == "canfd":
         fingerprints["openimu_interface.py"] = file_sha256(Path(__file__).with_name("openimu_interface.py"))
     fingerprints['inference_cpu_frequency_khz'] = 1344000 if args.cpu_frequency_socket else 0
@@ -401,7 +423,7 @@ def run(args, out, mode):
                 prior.get("direct_policy_start", False) != args.direct_policy_start or
                 prior.get("coherent_action_send", False) != args.coherent_action_send or
                 prior.get("can_schedule") != can_schedule or
-                prior.get("command_source") != ("xbox_control" if args.gamepad_control_device else "scripted") or
+                prior.get("command_source") != source or
                 prior["final_disabled_count"] != 31):
                 raise ValueError(f"same-build {expected_mode} gate required before enable")
 
@@ -499,9 +521,14 @@ def run(args, out, mode):
         gamepad_preview = ["--gamepad-preview-device", args.gamepad_preview_device] if args.gamepad_preview_device else []
         if args.gamepad_control_device:
             gamepad_preview = ["--gamepad-control-device", args.gamepad_control_device]
+        if args.standing_groove:
+            gamepad_preview = ["--gamepad-control-device", "/dev/input/js0", "--standing-groove",
+                               args.standing_groove/"standing_groove_100k.onnx"]
         coherent = ["--coherent-action-send"] if args.coherent_action_send else []
         if args.gamepad_control_device:
             coherent.append("--xbox-body-admission")
+        if args.standing_groove:
+            coherent.append("--standing-groove")
         ack = "ZERO_GAIN_SUPERMIMIC_WRITEBACK"
         if mode == "powered":
             ack = "ENABLE_SUSPENDED_SUPERMIMIC_LOW_GAIN"
@@ -515,6 +542,8 @@ def run(args, out, mode):
             ack = f"{action}_SUPERMIMIC_WALK_{walk_code}_10S"
         if args.gamepad_control_device:
             ack = "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_300S_070" if mode == "powered" else "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_300S_070"
+        if args.standing_groove:
+            ack = "ENABLE_STANDING_GROOVE_12S" if mode == "powered" else "PREVIEW_STANDING_GROOVE_12S"
         can = launch("can", [can_binary, "--supermimic-commissioning", *options, *tracking, *direct, *coherent, *walking, *can_status,
             "--acknowledge-hardware-tx", ack, "--all-motors-disabled-confirmed", "--config", out/"motors.tsv",
             "--kinematics-config", out/"kinematics.tsv", "--joint-safety-config", out/"joints.tsv",
@@ -567,7 +596,7 @@ def run(args, out, mode):
                     time.sleep(.05)
             threading.Thread(target=announce_xbox_window, daemon=True).start()
         if mode == "deadline_fault":
-            inject_at = time.monotonic() + (45.5 if args.gamepad_control_device else 36.5 if args.walk_speed else 6.5 if args.duration >= 10 else 1.25)
+            inject_at = time.monotonic() + (26.5 if args.standing_groove else 45.5 if args.gamepad_control_device else 36.5 if args.walk_speed else 6.5 if args.duration >= 10 else 1.25)
             while time.monotonic() < inject_at:
                 if cpu_lease: cpu_lease.check()
                 time.sleep(min(.05,max(0.,inject_at-time.monotonic())))
@@ -594,6 +623,8 @@ def run(args, out, mode):
             raise RuntimeError("CAN coherent-action mode differs from admission")
         if report.get("xbox_body_admission", False) != bool(args.gamepad_control_device):
             raise RuntimeError("CAN Xbox body admission differs from the selected command source")
+        if report.get("standing_groove", False) != bool(args.standing_groove):
+            raise RuntimeError("CAN choreography mode differs from the selected mode")
         if paused:
             actor.send_signal(signal.SIGCONT)
             paused = False
@@ -635,6 +666,8 @@ def run(args, out, mode):
                 raise RuntimeError("actor gamepad source differs from admission")
             if timing.get("gamepad_control", False) != bool(args.gamepad_control_device):
                 raise RuntimeError("actor Xbox control source differs from admission")
+            if args.standing_groove and timing.get("standing_groove_frames") != 600:
+                raise RuntimeError("Incomplete standing groove choreography")
             if args.tracked_startup:
                 if not report.get("pd_position_saturation"):
                     raise RuntimeError("pure PD position saturation was not active")
@@ -671,9 +704,19 @@ def run(args, out, mode):
                     if len(records) != frames:
                         raise RuntimeError("incomplete full-body actor trace")
                     if args.direct_policy_start:
-                        verify_direct_start(records, feedback, trace, contract.data)
+                        verify_direct_start(records, feedback, trace, contract.data, bool(args.standing_groove))
+                    previous = records["raw"][:-1].copy()
+                    if args.standing_groove:
+                        if np.any(feedback[:,68:]):
+                            raise RuntimeError("Unexpected dance velocity command")
+                        for i in (GROOVE_START, GROOVE_END):
+                            previous[i-1] = 0
+                            for field in (slice(0,310),slice(310,620),slice(620,930),slice(930,960),slice(960,990)):
+                                history = records["obs"][i, field].reshape(10,-1)
+                                if not np.all(history == history[-1]):
+                                    raise RuntimeError("Stale history at choreography handoff")
                     if (not np.array_equal(records["action"], records["raw"].astype(np.float64)) or
-                        not np.array_equal(records["obs"][1:, 899:930], records["raw"][:-1])):
+                        not np.array_equal(records["obs"][1:, 899:930], previous)):
                         raise RuntimeError("previous-action observations differ from preceding policy outputs")
                     for i, row in enumerate(trace):
                         if float(row["gain_alpha"]) == 1:
@@ -691,7 +734,7 @@ def run(args, out, mode):
                                last_second_tilt_peak_deg=tilt_peak,
                                body_settled=gyro_peak <= .15 and tilt_peak <= 10.)
                 if mode == "powered" and (not startup["body_settled"] or
-                                          (not (args.walk_speed or args.gamepad_control_device) and not startup["joint_settled"])):
+                                          (not (args.walk_speed or args.gamepad_control_device or args.standing_groove) and not startup["joint_settled"])):
                     raise RuntimeError("tracked startup did not meet the zero-command settling gate")
             if not args.tracked_startup and args.duration >= 6 and (not timing["gain_ramp_completed"] or timing["final_gain_ramp_alpha"] != 1):
                 raise RuntimeError("full startup gain ramp was not verified")
@@ -735,7 +778,11 @@ def run(args, out, mode):
         else:
             expected += (["ENABLED_31", "POLICY_BLEND"] if mode == "powered"
                          else ["DRY_ENABLE_NOTICE", "DRY_POLICY_BLEND"])
-        if args.gamepad_control_device:
+        if args.standing_groove:
+            expected += ["GROOVE_READY" if mode == "powered" else "DRY_GROOVE_READY"]
+            if mode != "deadline_fault":
+                expected += ["GROOVE_END"]
+        elif args.gamepad_control_device:
             expected += ["XBOX_READY" if mode == "powered" else "DRY_XBOX_READY"]
             if mode != "deadline_fault":
                 expected += ["XBOX_END"]
@@ -762,7 +809,7 @@ def run(args, out, mode):
                 operator_message(args.operator_status, OPERATOR_MESSAGES["DISABLE_UNCONFIRMED"])
     affinity_path = out/"native.bin.affinity.json"
     inference_affinity = json.loads(affinity_path.read_text()) if affinity_path.exists() else {}
-    has_io_worker = args.gamepad_control_device or args.gamepad_preview_device
+    has_io_worker = args.gamepad_control_device or args.gamepad_preview_device or args.standing_groove
     if not (inference_affinity.get("verified") is True and inference_affinity.get("main_cpu") == 4
             and inference_affinity.get("ort_worker_cpu") == (-1 if os.environ.get("SPRITE_INFERENCE_THREADS")=="1" else 5)
             and inference_affinity.get("io_cpu") == (1 if has_io_worker else -1)):
@@ -790,7 +837,7 @@ def run(args, out, mode):
                     cpu_frequency=cpu_frequency,
                     timing_max_ms=timing_max_ms, deadline_stage=report.get("deadline_stage"),
                     velocity_command=None if (args.gamepad_preview_device or args.gamepad_control_device) else [args.walk_speed,0,0],
-                    command_source="xbox_control" if args.gamepad_control_device else "xbox_preview" if args.gamepad_preview_device else "scripted",
+                    command_source="xbox_preview" if args.gamepad_preview_device else source,
                     operator_disable_requested="OPERATOR_DISABLE" in operator_events,
                     motor_enable_attempts=enables,
                     final_disabled_count=disabled, fingerprints=fingerprints,
@@ -827,6 +874,8 @@ def main():
                         help="Input-only command integration; powered mode is forbidden")
     parser.add_argument("--gamepad-control-device", type=Path,
                         help="Bounded Xbox trial after the unchanged standing checkpoint")
+    parser.add_argument("--standing-groove", type=Path, metavar="PACKAGE",
+                        help="Run one fixed 600-frame choreography with Xbox operator stop")
     walking = parser.add_mutually_exclusive_group()
     walking.add_argument("--walk-020", dest="walk_speed", action="store_const", const=.20, default=0.)
     walking.add_argument("--walk-025", dest="walk_speed", action="store_const", const=.25)
@@ -837,6 +886,9 @@ def main():
                           help="full-body zero-speed evidence stopped only by all-joint settling")
     parser.add_argument("--operator-status", type=Path)
     args = parser.parse_args()
+    if args.standing_groove and (args.gamepad_control_device or args.gamepad_preview_device or args.walk_speed or
+                                 not (args.direct_policy_start and args.coherent_action_send and args.sling_window)):
+        parser.error("standing groove requires direct coherent sling mode without velocity commands")
     if args.gamepad_preview_device and (args.enable_suspended or args.walk_speed or not args.direct_policy_start):
         parser.error("gamepad preview is restricted to disabled direct-policy tests without scripted walking")
     if args.gamepad_control_device and (args.gamepad_preview_device or args.walk_speed or
@@ -859,7 +911,7 @@ def main():
     if args.sling_window:
         if not args.tracked_startup or not args.operator_status:
             parser.error("sling window requires a reviewed tracked startup profile and --operator-status")
-        args.duration = XBOX_DURATION if args.gamepad_control_device else WALK_DURATION if args.walk_speed else SLING_DURATION
+        args.duration = GROOVE_DURATION if args.standing_groove else XBOX_DURATION if args.gamepad_control_device else WALK_DURATION if args.walk_speed else SLING_DURATION
     elif args.tracked_startup and args.duration != 10:
         parser.error("tracked startup requires the 10-second commissioning tier")
     if args.check_saved_evidence and not (args.passed_disabled or args.passed_deadline_fault):

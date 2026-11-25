@@ -207,6 +207,7 @@ struct Options {
   bool direct_policy_start = false;
   bool coherent_action_send = false;
   bool xbox_body_admission = false;
+  bool standing_groove = false;
   bool supermimic_commissioning = false;
   double walk_speed = 0.0;
   int sling_ready_fd = -1, operator_status_fd = -1;
@@ -580,6 +581,7 @@ Options parse_options(int argc, char** argv) {
     else if (argument == "--direct-policy-start") result.direct_policy_start = true;
     else if (argument == "--coherent-action-send") result.coherent_action_send = true;
     else if (argument == "--xbox-body-admission") result.xbox_body_admission = true;
+    else if (argument == "--standing-groove") result.standing_groove = true;
     else if (argument == "--walk-020" || argument == "--walk-025" || argument == "--walk-030") {
       if (result.walk_speed > 0.0) throw std::runtime_error("only one walking profile can be selected");
       result.walk_speed = argument == "--walk-020" ? .20 : argument == "--walk-025" ? .25 : .30;
@@ -622,7 +624,11 @@ Options parse_options(int argc, char** argv) {
       !result.coherent_action_send || !result.supermimic_commissioning)) {
     throw std::runtime_error("Xbox body admission requires direct coherent sling commissioning without scripted walking");
   }
-  const auto sling_duration = result.xbox_body_admission ? sprite_policy::kXboxDurationSeconds : walking ? sprite_policy::kWalkDurationSeconds
+  if (result.standing_groove && (!sling || walking || result.xbox_body_admission || !result.direct_policy_start ||
+      !result.coherent_action_send || !result.supermimic_commissioning))
+    throw std::runtime_error("Standing groove requires dedicated direct coherent sling commissioning");
+  const auto sling_duration = result.standing_groove ? sprite_policy::kGrooveDurationSeconds :
+                              result.xbox_body_admission ? sprite_policy::kXboxDurationSeconds : walking ? sprite_policy::kWalkDurationSeconds
                                              : sprite_policy::kSlingDurationSeconds;
   if (walking && !sling) throw std::runtime_error("walking requires the sling and operator channels");
   if (sling && (result.sling_ready_fd < 0 || result.operator_status_fd < 0 ||
@@ -640,7 +646,9 @@ Options parse_options(int argc, char** argv) {
        result.duration_s < 0.02 || std::abs(result.duration_s * 50 - std::round(result.duration_s * 50)) > 1.0e-9)) {
     throw std::runtime_error("SuperMimic commissioning requires strict IPC and a bounded duration");
   }
-  const std::string required_ack = result.xbox_body_admission
+  const std::string required_ack = result.standing_groove
+      ? (result.policy_actuation ? "ENABLE_STANDING_GROOVE_12S" : "PREVIEW_STANDING_GROOVE_12S")
+      : result.xbox_body_admission
       ? (result.policy_actuation ? "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_300S_070" : "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_300S_070")
       : walking
       ? std::string(result.policy_actuation ? "ENABLE_SUPERMIMIC_WALK_" : "PREVIEW_SUPERMIMIC_WALK_") +
@@ -2210,16 +2218,20 @@ int run_native_protected_policy(
           read_readiness(sling_readiness, sprite_policy::kSlingReadySequence);
           if (powered && !sprite_policy::sling_ready(sling_readiness, ipc.last_target_source_sequence,
                                                     sprite_policy::kSlingReadySequence,
-                                                    sprite_policy::sling_requires_joint_settling(walking, options.xbox_body_admission))) {
+                                                    sprite_policy::sling_requires_joint_settling(walking, options.xbox_body_admission || options.standing_groove))) {
             emit_status("NOT_STABLE\n");
             throw std::runtime_error("zero-command standing not settled at sling checkpoint");
           }
-          if (options.xbox_body_admission)
+          if (options.standing_groove)
+            emit_status(powered ? "GROOVE_READY\n" : "DRY_GROOVE_READY\n");
+          else if (options.xbox_body_admission)
             emit_status(powered ? "XBOX_READY\n" : "DRY_XBOX_READY\n");
           else if (walking)
             emit_status(powered ? "WALK_SLING_WINDOW_OPEN\n" : "DRY_WALK_SLING_WINDOW_OPEN\n");
           else emit_status(powered ? "SLING_WINDOW_OPEN\n" : "DRY_WINDOW_OPEN\n");
           sling_window_opened = powered;
+        } else if (options.standing_groove) {
+          if (seconds == 33) emit_status("GROOVE_END\n");
         } else if (options.xbox_body_admission) {
           if (seconds == sprite_policy::kXboxEndNoticeSeconds) emit_status("XBOX_END\n");
         } else if (seconds > first && seconds < last) {
@@ -2377,7 +2389,8 @@ int run_native_protected_policy(
       << "  \"walk_checkpoint_joint_frames\": " << walk_readiness.joint_stable_frames << ",\n"
       << "  \"walk_checkpoint_body_frames\": " << walk_readiness.body_stable_frames << ",\n"
       << "  \"xbox_body_admission\": " << (options.xbox_body_admission ? "true" : "false") << ",\n"
-      << "  \"walk_joint_settling_required\": " << (sprite_policy::sling_requires_joint_settling(walking, options.xbox_body_admission) ? "true" : "false") << ",\n"
+      << "  \"standing_groove\": " << (options.standing_groove ? "true" : "false") << ",\n"
+      << "  \"walk_joint_settling_required\": " << (sprite_policy::sling_requires_joint_settling(walking, options.xbox_body_admission || options.standing_groove) ? "true" : "false") << ",\n"
       << "  \"walk_speed_m_s\": " << options.walk_speed << ",\n"
       << "  \"automatic_mode_switch_attempts\": 0,\n"
       << "  \"automatic_zero_reset_attempts\": 0,\n"

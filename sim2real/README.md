@@ -59,6 +59,26 @@ In the powered OpenIMU trial on Jetson 253, the controller recorded `XBOX_READY`
 
 Other [253 launchers](../scripts/) and the [initial preflight and trace analysis](jetson253/) refer to their original commissioning directories. [Incremental patches](patches/) record the development sequence from upstream through the 100k port, Xbox 30 s, Xbox 120 s, wide range, Xbox 300 s and lateral ±0.50 m/s. The checkout already contains the final source. Trial reports retain their original hardware qualification fields and binary hashes. A fresh build must collect its own admission evidence.
 
+### Standing groove on Jetson 253
+
+The dedicated `scripts/standing-groove-253.sh` launcher defaults to offline replay. It uses the protected actor binary to compare all 600 frames and 31 raw actions per frame with the packaged MLX reference. A second pass rebuilds each ten-frame history from the current recorded state and the native actor's own preceding raw action. Both passes use the release tolerances of `atol=rtol=2e-4`. The report is saved as `sim2real/build/jetson253/groove-native-600.json`.
+
+On Jetson 253, the maximum absolute action error was 0.00000858 with the packaged histories and 0.00000954 with histories rebuilt by the native actor. These measurements cover CPU inference on recorded observations. [All 600 per-frame errors](evidence/standing-groove-native-253.json)
+
+The live schedule uses the existing walking actor at zero velocity for the standing checkpoint at 20 seconds. On admission, the groove actor starts with ten copies of the measured state and zero previous action. It advances from frame 0 to 599 at 50 Hz, then returns to the zero-command standing actor with a two-second pose handoff. The controller finishes its 36.5-second schedule by disabling the drives and verifying individual feedback. Xbox LB+RB held for three seconds requests disable throughout powered control. The sticks do not command movement in this mode.
+
+In powered trial `groove-Cd5NBF`, Jetson 253 completed all 600 choreography frames with OpenIMU over CAN FD. Across the full run, the actor processed 1,826 state frames and the CAN controller dispatched 1,825 synchronized action groups. Neither recorded a deadline miss. The maximum elapsed time from the oldest motor feedback to acceptance of the corresponding policy target was 10.788 ms against the 20 ms limit. All 31 drives reported disabled at exit. [Powered trial and motor TX audit](evidence/standing-groove-powered-253.json)
+
+After building with `bash sim2real/build-jetson.sh`, run the phases separately. The qualification phase requires feedback from the disabled drives and tests an intentional missed deadline. The powered phase checks matching dance-specific evidence and requires the operator at the terminal to type `GROOVE12`. Both hardware phases accept `spi` in place of the default `canfd` backend.
+
+```bash
+bash scripts/standing-groove-253.sh --replay
+bash scripts/standing-groove-253.sh --qualify canfd
+bash scripts/standing-groove-253.sh --powered canfd
+```
+
+After a battery swap on the qualified OpenIMU setup, reconnect the Xbox controller, support the robot with the drives disabled, and run `bash scripts/standing-groove-after-battery-253.sh` at the Jetson terminal. This restores the KCAN and OpenIMU interfaces and starts the same operator-confirmed powered entry.
+
 ### IMU selection
 
 The current Xbox launcher defaults to `--imu-backend canfd`. It discovers the dedicated PCAN-USB FD adapter (USB ID `0c72:0012`) on each start. Use `--imu-can-interface IFACE` if multiple matching adapters are present. The setup command above configures that adapter at 1 Mbit/s arbitration and 5 Mbit/s data. To use the original SPI wiring, select `--imu-backend spi` for qualification and each subsequent run. Qualification records include the selected source. Both paths use the X-down/Z-back sensor mounting, 15-second stationary bias and the same policy IPC format.

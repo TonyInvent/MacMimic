@@ -10,6 +10,9 @@ constexpr int kSlingCountdownSeconds = 10;
 // Leave half a second for delivery of the local operator notification.
 constexpr double kSlingDurationSeconds = kSlingStandSeconds + kSlingCountdownSeconds + 0.5;
 constexpr std::uint64_t kXboxControlOpenFrame = 1002;
+// The CAN controller checks the standing checkpoint at 20 s before publishing this state.
+constexpr std::uint64_t kGrooveStartFrame = kXboxControlOpenFrame;
+constexpr double kGrooveDurationSeconds = 36.5;
 constexpr std::uint64_t kXboxControlFrames = 300 * 50;
 constexpr std::uint64_t kXboxControlCloseFrame = kXboxControlOpenFrame + kXboxControlFrames;
 // Full command window plus 4 s maximum braking and a final quiet interval.

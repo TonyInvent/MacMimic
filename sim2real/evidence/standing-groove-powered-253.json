@@ -1,0 +1,63 @@
+{
+  "host": "Jetson 253",
+  "trial": "groove-Cd5NBF/powered",
+  "date": "2026-11-25",
+  "mode": "powered",
+  "passed": true,
+  "duration_s": 36.5,
+  "command_source": "standing_groove",
+  "imu_source": {
+    "backend": "canfd",
+    "interface": "spriteimu0",
+    "usb_port": "1-2.3",
+    "serial": ""
+  },
+  "groove_model_sha256": "ad35d34d4652bb9134c54788c0bf80f9ae6a4e5e77d4ac2ff8e00a33b490e796",
+  "training_full_body": true,
+  "operator_events": [
+    "WAITING_FOR_ENABLE",
+    "POLICY_DIRECT",
+    "ENABLED_31",
+    "GROOVE_READY",
+    "GROOVE_END",
+    "DISABLED_31"
+  ],
+  "policy_frames": 1826,
+  "standing_groove_frames": 600,
+  "actor_deadline_misses": 0,
+  "can_deadline_misses": 0,
+  "motor_enable_attempts": 31,
+  "final_disabled_count": 31,
+  "inference_ms": {
+    "mean": 3.06211856955,
+    "p50": 2.813257,
+    "p95": 3.695293,
+    "p99": 3.766906,
+    "max": 4.25538
+  },
+  "oldest_feedback_to_target_accept_max_ms": 10.788244,
+  "action_tx_audit": {
+    "passed": true,
+    "groups": 1825,
+    "motor_dispatches": 56575,
+    "whole_group_driver_span_max_ms": 0.28118,
+    "per_bus_hardware_span_max_ms": 0.911,
+    "actor_target_to_driver_upper_max_ms": 0.879882,
+    "accept_to_driver_upper_max_ms": 0.483267,
+    "oldest_feedback_to_driver_upper_max_ms": 11.013623,
+    "physical_tx_delay_upper_max_ms": 2.501961,
+    "final_disabled_count": 31,
+    "limitations": [
+      "Driver TX is not motor execution acknowledgement.",
+      "Physical TX host-time bounds use send-call entry and hardware completion receipt; no cross-clock subtraction.",
+      "Raw hardware clock is not assumed synchronized between adapters or with the host.",
+      "Disabled validation measures zero-gain frame transport, not powered motion."
+    ]
+  },
+  "source_sha256": {
+    "commissioning.json": "828cf0cfa69001a7b347d0c3bae69c79f5c571b520d46618303268d728382dfd",
+    "can.json": "f18c84db608bbdb0d5c4304ff36460d99a39e49a27e8b05e5a86c4c5a397225d",
+    "native.bin.timing.json": "aa629bed2ddeb6d6657b51c394f4a713958605ef36bdbc6d994eded5b8496388",
+    "action-tx-audit.json": "3a8705b903ebc673d0d0284c935fd00023d07ac36c03429602953230dd1cca2d"
+  }
+}

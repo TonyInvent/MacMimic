@@ -13,9 +13,9 @@ python3 standing_groove_replay.py
 
 The fixture contains all 600 simulated observation histories packed in the walking runtime's layout and the corresponding raw MLX actions. The Mac CPU replay passes at a maximum absolute action difference of 0.0000124. The wall time of this offline inference test measures model calls only.
 
-## Live integration on the lab branch
+## Jetson hardware integration
 
-The native walking runner at commit `fc2da55` expects one float observation of width 993. This ONNX has two named inputs. A dedicated motion mode in the Jetson actor must supply both. Keep the existing walking launcher and its policy binding available under their own names. [Native walking inference](https://github.com/TonyInvent/MacMimic/blob/fc2da55/runtime/native/src/sprite_supermimic_replay.cpp#L282-L304)
+The dedicated standing-groove mode in the Jetson runtime packs the walking runner's 993-float observation into the history tensor below and supplies the frame index. The Xbox walking launcher has its own policy binding. [Jetson setup and commands](../../sim2real/README.md#standing-groove-on-jetson-253)
 
 | Name | Type and shape | Contents |
 |---|---|---|
@@ -25,7 +25,7 @@ The native walking runner at commit `fc2da55` expects one float observation of w
 
 The package includes the exact training control profile (named Kp, Kd, limits and offsets). The replay script provides the packing function for a 993-float observation from the existing runtime. At initialization the Mac simulation repeats its first observed frame ten times with zero previous action. Subsequent histories include the previous raw output. The model governs motion through its frame index. The WAV is an optional playback cue.
 
-For hardware adaptation, bind the new model and contract to the dedicated runner and replay the same fixture through its native observation and inference code. Preserve the site's motor mapping, IMU handling, position and torque protections, timing checks, operator stop and confirmed-disable path. Start frame 0 at the validated motion handoff. Return to the site's controlled end-of-motion handling after frame 599. The release includes the Jetson offline test and Mac simulation launcher. Powered operation and suspension behavior of this policy still require validation on the target robot.
+In a powered OpenIMU trial on Jetson 253, the actor started frame 0 after the standing checkpoint, completed frame 599 and returned to zero-command standing. The controller recorded zero deadline misses, then confirmed all 31 drives disabled from individual feedback. [Powered trial record](../../sim2real/evidence/standing-groove-powered-253.json)
 
 ## Mac simulation
 

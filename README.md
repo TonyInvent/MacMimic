@@ -18,9 +18,11 @@ During Xbox control, hold **LB + RB for three continuous seconds** to end the ru
 
 Motion sources are [Ubisoft La Forge LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) and [BONES-SEED](https://huggingface.co/datasets/bones-studio/seed). Training data includes [Motion Data by Bones Studio](https://bones.studio/). Use of the underlying dataset is subject to the [BONES Motion Capture Dataset License Agreement](https://bones.studio/info/seed-license).
 
-## OpenSprite standing groove · lab test
+## OpenSprite standing groove · powered hardware test
 
-A separate fixed-motion ONNX performs the 12-second standing choreography with a drum beat. The lab package includes the motion contract, training control profile, reference, preview and 600-frame Jetson CPU replay. Hardware integration uses the groove actor's history and frame inputs. [Lab instructions](policies/opensprite-standing-groove/README.md) · [Download the lab package](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-standing-groove-s49-v1/opensprite-standing-groove-s49-v1.zip)
+On Jetson 253 with OpenIMU over CAN FD, OpenSprite completed all 600 frames of the 12-second standing choreography at 50 Hz using `standing_groove_100k.onnx`. The 36.5-second powered run included the standing checkpoint, dance and return to standing. The actor and CAN controller recorded zero deadline misses, and all 31 drives reported disabled at exit. [Powered trial record](sim2real/evidence/standing-groove-powered-253.json) · [Jetson launcher and replay instructions](sim2real/README.md#standing-groove-on-jetson-253)
+
+The lab package includes the motion contract, training control profile, reference, preview, drum track and 600-frame replay fixture. [Lab instructions](policies/opensprite-standing-groove/README.md) · [Download the lab package](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-standing-groove-s49-v1/opensprite-standing-groove-s49-v1.zip)
 
 ## Earlier Sprite SM-Walk R1 policy
 

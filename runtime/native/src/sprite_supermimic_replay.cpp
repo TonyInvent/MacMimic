@@ -20,6 +20,7 @@
 #endif
 #endif
 #include <onnxruntime_cxx_api.h>
+#include "standing_groove.hpp"
 #include "inference_diagnostics.hpp"
 #include "inference_cpu_layout.hpp"
 #include <memory>
@@ -120,6 +121,11 @@ int main(int argc,char** argv) {
   std::vector<StartupSample> startup_trace;
 #endif
   try {
+    if(argc==5 && (std::string(argv[1])=="--replay-standing-groove" ||
+                   std::string(argv[1])=="--replay-standing-groove-feedback")) {
+      sprite_policy::replay_groove(argv[2],argv[3],argv[4],std::string(argv[1])=="--replay-standing-groove-feedback");
+      return 0;
+    }
     if(argc<4)throw std::runtime_error("Usage: sprite_supermimic_replay MODEL FIXTURE OUTPUT [--benchmark] [--threads N] [--warmup N]");
     bool macmimic_100k=false;
     bool paced=false,diagnose_inference=false,isolated_inference=false,no_ort_spinning=false;int threads=1,warmup=50;
@@ -136,6 +142,7 @@ int main(int argc,char** argv) {
     double walk_speed=0.;
     std::string gamepad_preview_device;
     std::string gamepad_control_device;
+    std::string groove_model;
     int sling_ready_fd=-1;
 #endif
     for(int i=4;i<argc;++i) {
@@ -153,6 +160,7 @@ int main(int argc,char** argv) {
       else if(option=="--direct-policy-start")direct_policy_start=true;
       else if(option=="--gamepad-preview-device" && i+1<argc)gamepad_preview_device=argv[++i];
       else if(option=="--gamepad-control-device" && i+1<argc)gamepad_control_device=argv[++i];
+      else if(option=="--standing-groove" && i+1<argc)groove_model=argv[++i];
       else if(option=="--walk-020" || option=="--walk-025" || option=="--walk-030") {
         if(walk_speed>0.)throw std::runtime_error("only one walking profile can be selected");
         walk_speed=option=="--walk-020"?.20:option=="--walk-025"?.25:.30;
@@ -209,6 +217,8 @@ int main(int argc,char** argv) {
        !direct_policy_start || walk_speed>0. || sling_ready_fd<0))
       throw std::runtime_error("gamepad control requires direct sling mode without another command source");
     std::unique_ptr<sprite_policy::LinuxGamepad> gamepad_preview;
+    if(!groove_model.empty() && (!macmimic_100k || gamepad_control_device.empty()))
+      throw std::runtime_error("Standing groove requires the standing policy and operator stop device");
     sprite_policy::GamepadControlWindow gamepad_window;
     sprite_policy::GamepadConfig gamepad_config;
     gamepad_config.lateral_enabled=macmimic_100k;
@@ -242,7 +252,7 @@ int main(int argc,char** argv) {
     std::uint64_t body_stable_frames=0;
     if(sling_ready_fd>=0) {
       const int flags=fcntl(sling_ready_fd,F_GETFL);
-      const auto duration=!gamepad_control_device.empty()?sprite_policy::kXboxDurationSeconds:
+      const auto duration=!groove_model.empty()?sprite_policy::kGrooveDurationSeconds:!gamepad_control_device.empty()?sprite_policy::kXboxDurationSeconds:
           walk_speed>0.?sprite_policy::kWalkDurationSeconds:sprite_policy::kSlingDurationSeconds;
       if(!tracked_startup || count!=duration*50+1 ||
          flags<0 || !(flags&O_NONBLOCK) || (flags&O_ACCMODE)!=O_WRONLY)
@@ -303,6 +313,15 @@ int main(int argc,char** argv) {
       std::copy_n(values[0].GetTensorData<float>(),31,raw.begin());
     };
     auto warm_core=core;
+#ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
+    std::optional<sprite_policy::StandingGroove> groove;
+    int groove_frames=0;
+    if(!groove_model.empty()) {
+      groove.emplace(env,groove_model.c_str());
+      std::array<float,31> scratch{};
+      for(int i=0;i<warmup;++i)groove->infer({},0,scratch);
+    }
+#endif
     for(int i=0;i<warmup;++i) {
       const auto& row=inputs[static_cast<std::size_t>(i)%inputs.size()];
       auto obs=warm_core.observe(row);std::array<float,31> raw{};infer(obs,raw);warm_core.latch(raw,row);
@@ -419,16 +438,18 @@ int main(int argc,char** argv) {
         const auto source=gamepad_preview->snapshot();
         if(source.button_map_fault)throw std::runtime_error("Xbox disable buttons unavailable");
         if(!gamepad_control_device.empty() && source.disable_requested)channel.request_operator_disable();
-        const auto now=sprite_policy::gamepad_now();
-        const bool allowed=gamepad_control_device.empty()?i>0:gamepad_window.allowed(i,source,now);
-        const auto command=gamepad_command.sample(source,now,allowed);
-        gamepad_audit[i]={double(i),double(source.connected),double(source.permitted),source.lt,source.forward,source.turn,command[0],command[1],command[2]};
-        std::copy(command.begin(),command.end(),inputs[i].begin()+68);
-        if(i==1 && gamepad_control_device.empty())std::cout<<"GAMEPAD_PREVIEW_READY: motors disabled by preview launcher; center sticks, press/release LT, then hold LT to test commands."<<std::endl;
-        if(!gamepad_control_device.empty() && i==sprite_policy::GamepadControlWindow::open_frame)
-          std::cout<<"XBOX_WINDOW_OPEN: 300 seconds of control. Center sticks, release LT, then hold LT to command motion. Retain fall protection."<<std::endl;
-        if(!gamepad_control_device.empty() && i==sprite_policy::GamepadControlWindow::close_frame)
-          std::cout<<"XBOX_WINDOW_CLOSED: commands decelerate to zero; automatic disable follows."<<std::endl;
+        if(!groove) {
+          const auto now=sprite_policy::gamepad_now();
+          const bool allowed=gamepad_control_device.empty()?i>0:gamepad_window.allowed(i,source,now);
+          const auto command=gamepad_command.sample(source,now,allowed);
+          gamepad_audit[i]={double(i),double(source.connected),double(source.permitted),source.lt,source.forward,source.turn,command[0],command[1],command[2]};
+          std::copy(command.begin(),command.end(),inputs[i].begin()+68);
+          if(i==1 && gamepad_control_device.empty())std::cout<<"GAMEPAD_PREVIEW_READY: motors disabled by preview launcher; center sticks, press/release LT, then hold LT to test commands."<<std::endl;
+          if(!gamepad_control_device.empty() && i==sprite_policy::GamepadControlWindow::open_frame)
+            std::cout<<"XBOX_WINDOW_OPEN: 300 seconds of control. Center sticks, release LT, then hold LT to command motion. Retain fall protection."<<std::endl;
+          if(!gamepad_control_device.empty() && i==sprite_policy::GamepadControlWindow::close_frame)
+            std::cout<<"XBOX_WINDOW_CLOSED: commands decelerate to zero; automatic disable follows."<<std::endl;
+        }
       }
 #endif
 #endif
@@ -436,6 +457,13 @@ int main(int argc,char** argv) {
 #ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
       const bool handshake_only=direct_policy_start && i==0;
       if(direct_policy_start && i==1) { core.reset_episode(); if(!macmimic_100k)core.steps=0; }
+      const auto groove_start=sprite_policy::kGrooveStartFrame;
+      const auto groove_end=groove_start+sprite_policy::StandingGroove::frames;
+      const bool dancing=groove && i>=groove_start && i<groove_end;
+      if(groove && (i==groove_start || i==groove_end)) {
+        core.reset_episode();
+        core.steps=i==groove_start?0:100;
+      }
 #endif
       record.obs=core.observe(inputs[i]);
       if(inference_probe) inference_probe->begin(i);
@@ -444,7 +472,8 @@ int main(int argc,char** argv) {
       cycle.infer_start_ns=sprite_policy::monotonic_ns();
 #endif
 #ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
-      if(!handshake_only) infer(record.obs,record.raw);
+      if(dancing) groove->infer(record.obs,groove_frames++,record.raw);
+      else if(!handshake_only) infer(record.obs,record.raw);
 #else
       infer(record.obs,record.raw);
 #endif
@@ -533,7 +562,7 @@ int main(int argc,char** argv) {
     const double wall_ms=ms(Clock::now()-anchor);
     std::ofstream out(argv[3],std::ios::binary),csv(std::string(argv[3])+".timing.csv");
 #ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
-    if(gamepad_preview) {
+    if(gamepad_preview && !groove) {
       std::ofstream audit(std::string(argv[3])+".gamepad.csv");
       audit<<"frame,connected,permitted,lt,forward_axis,turn_axis,vx,vy,wz\n";
       for(const auto& row:gamepad_audit) {for(std::size_t j=0;j<row.size();++j)audit<<(j?",":"")<<row[j];audit<<'\n';}
@@ -602,7 +631,8 @@ int main(int argc,char** argv) {
           <<",\"action_history\":\""<<(training_full_body?"policy_output":"admitted_waypoint")<<"\""
           <<",\"walk_speed_m_s\":"<<walk_speed
           <<",\"gamepad_preview\":"<<(!gamepad_preview_device.empty()?"true":"false")
-          <<",\"gamepad_control\":"<<(!gamepad_control_device.empty()?"true":"false")
+          <<",\"gamepad_control\":"<<(!gamepad_control_device.empty() && !groove?"true":"false")
+          <<",\"standing_groove_frames\":"<<groove_frames
           <<",\"startup_final_tracking_error_rad\":"<<(tracked?tracked->tracking_error_rad:0.)
           <<",\"startup_final_goal_error_rad\":"<<(tracked?tracked->goal_error_rad:0.)
           <<",\"startup_stable_frames\":"<<(tracked?tracked->stable_frames():0)
