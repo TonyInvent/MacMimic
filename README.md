@@ -18,6 +18,10 @@ During Xbox control, hold **LB + RB for three continuous seconds** to end the ru
 
 Motion sources are [Ubisoft La Forge LAFAN1](https://github.com/ubisoft/ubisoft-laforge-animation-dataset) and [BONES-SEED](https://huggingface.co/datasets/bones-studio/seed). Training data includes [Motion Data by Bones Studio](https://bones.studio/). Use of the underlying dataset is subject to the [BONES Motion Capture Dataset License Agreement](https://bones.studio/info/seed-license).
 
+## OpenSprite standing groove · lab test
+
+A separate fixed-motion ONNX performs the 12-second standing choreography with a drum beat. The lab package includes the motion contract, training control profile, reference, preview and 600-frame Jetson CPU replay. Hardware integration uses the groove actor's history and frame inputs. [Lab instructions](policies/opensprite-standing-groove/README.md) · [Download the lab package](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-standing-groove-s49-v1/opensprite-standing-groove-s49-v1.zip)
+
 ## Earlier Sprite SM-Walk R1 policy
 
 [Watch the earlier 35-second R1 replay (update 1,800)](docs/opensprite-r1/xbox_sequence.mp4).
