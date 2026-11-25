@@ -24,6 +24,10 @@ On Jetson 253 with OpenIMU over CAN FD, OpenSprite completed all 600 frames of t
 
 The lab package includes the motion contract, training control profile, reference, preview, drum track and 600-frame replay fixture. [Lab instructions](policies/opensprite-standing-groove/README.md) · [Download the lab package](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-standing-groove-s49-v1/opensprite-standing-groove-s49-v1.zip)
 
+## OpenSprite disco point · simulation-tested lab release
+
+The 32.8-second, 100 BPM fixed-motion policy alternates diagonal pointing and horizontal arm extensions. The separate lab package includes its ONNX, 1,640-frame replay and beat. [Preview](policies/opensprite-disco-point/disco_point_preview.mp4) · [Lab instructions](policies/opensprite-disco-point/README.md) · [Download ZIP](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-disco-point-s49-v1/opensprite-disco-point-s49-v1.zip)
+
 ## Earlier Sprite SM-Walk R1 policy
 
 [Watch the earlier 35-second R1 replay (update 1,800)](docs/opensprite-r1/xbox_sequence.mp4).

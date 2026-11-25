@@ -1,4 +1,4 @@
-"""Run the fixed 12-second ONNX choreography once in local MuJoCo."""
+"""Run a fixed-motion OpenSprite ONNX choreography once in local MuJoCo."""
 import argparse
 from contextlib import nullcontext
 import hashlib
@@ -19,9 +19,9 @@ from supermimic_mlx.scene import build_model
 PACKAGE = Path(__file__).resolve().parents[1] / "policies/opensprite-standing-groove"
 
 
-def play(package=PACKAGE, *, headless=False, compare=None):
-    contract = json.loads((package / "standing_groove_contract.json").read_text())
-    policy = package / "standing_groove_100k.onnx"
+def play(package=PACKAGE, *, headless=False, compare=None, prefix="standing_groove"):
+    contract = json.loads((package / f"{prefix}_contract.json").read_text())
+    policy = package / f"{prefix}_100k.onnx"
     if (hashlib.sha256(policy.read_bytes()).hexdigest() != contract["policy_onnx_sha256"]
             or tuple(contract["joint_names"]) != robot.JOINT_NAMES
             or contract["control_profile_sha256"] != robot.source.CONTROL_PROFILE_SHA256):
@@ -52,7 +52,7 @@ def play(package=PACKAGE, *, headless=False, compare=None):
             window.cam.distance, window.cam.azimuth, window.cam.elevation = 1.82, 10, -6
             window.cam.lookat[:] = [0, 0, .50]
             window.sync()
-        sound = subprocess.Popen(["afplay", str(package / "standing_groove_beat.wav")]) if window else None
+        sound = subprocess.Popen(["afplay", str(package / f"{prefix}_beat.wav")]) if window else None
         try:
             start = time.monotonic()
             for frame in range(contract["frames"]):
@@ -83,4 +83,10 @@ def play(package=PACKAGE, *, headless=False, compare=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--headless", action="store_true", help="Run the same simulation without graphics or audio")
-    print(f"Simulated {play(headless=parser.parse_args().headless)} frames")
+    parser.add_argument("--disco-point", action="store_true", help="Play the 32.8-second disco choreography")
+    args = parser.parse_args()
+    if args.disco_point:
+        frames = play(PACKAGE.with_name("opensprite-disco-point"), prefix="disco_point", headless=args.headless)
+    else:
+        frames = play(headless=args.headless)
+    print(f"Simulated {frames} frames")

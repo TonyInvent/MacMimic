@@ -1,0 +1,17 @@
+{
+  "frames": 1640,
+  "seconds": 32.8,
+  "max_foot_displacement_cm": [
+    7.769767195332501,
+    7.2120988299890225
+  ],
+  "max_abs_heading_change_deg": 32.62003960527377,
+  "max_sole_clearance_cm": [
+    0.18404861751306795,
+    0.0
+  ],
+  "wrist_vertical_excursion_cm": [
+    36.890134671134625,
+    41.081919538366975
+  ]
+}
