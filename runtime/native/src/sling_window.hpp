@@ -12,6 +12,9 @@ constexpr double kSlingDurationSeconds = kSlingStandSeconds + kSlingCountdownSec
 constexpr std::uint64_t kXboxControlOpenFrame = 1002;
 // The CAN controller checks the standing checkpoint at 20 s before publishing this state.
 constexpr std::uint64_t kGrooveStartFrame = kXboxControlOpenFrame;
+constexpr int kGrooveFrames = 600;
+constexpr int kDiscoFrames = 1640;
+constexpr double kDiscoDurationSeconds = 57.3;
 constexpr double kGrooveDurationSeconds = 36.5;
 constexpr std::uint64_t kXboxControlFrames = 300 * 50;
 constexpr std::uint64_t kXboxControlCloseFrame = kXboxControlOpenFrame + kXboxControlFrames;

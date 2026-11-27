@@ -24,11 +24,11 @@ On Jetson 253 with OpenIMU over CAN FD, OpenSprite completed all 600 frames of t
 
 The lab package includes the motion contract, training control profile, reference, preview, drum track and 600-frame replay fixture. [Lab instructions](policies/opensprite-standing-groove/README.md) · [Download the lab package](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-standing-groove-s49-v1/opensprite-standing-groove-s49-v1.zip)
 
-## OpenSprite disco point · simulation-tested lab release
+## OpenSprite Disco Point · powered hardware test
 
 The 32.8-second, 100 BPM fixed-motion policy alternates diagonal pointing and horizontal arm extensions. The separate lab package includes its ONNX, 1,640-frame replay and beat. [Preview](policies/opensprite-disco-point/disco_point_preview.mp4) · [Lab instructions](policies/opensprite-disco-point/README.md) · [Download ZIP](https://github.com/TonyInvent/MacMimic/releases/download/opensprite-disco-point-s49-v1/opensprite-disco-point-s49-v1.zip)
 
-For the Jetson port, follow the [实验室 Codex 交接说明](sim2real/DISCO_POINT_LAB_HANDOFF.md).
+On Jetson 253 with OpenIMU over CAN FD, OpenSprite completed all 1,640 dance frames at 50 Hz and returned to stable standing with a 10-frame (0.2-second) handoff. Peak body tilt in the first two seconds after the switch was 4.66°. All 31 drives confirmed disabled at exit. [Powered trial record](sim2real/evidence/disco-point-return10-powered-253.json) · [Replay, qualification and operator commands](sim2real/README.md#disco-point-on-jetson-253)
 
 ## Earlier Sprite SM-Walk R1 policy
 

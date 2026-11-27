@@ -1,0 +1,297 @@
+{
+  "trial": "disco-point-I8Tlr6",
+  "return_frames": 10,
+  "commissioning": {
+    "mode": "powered",
+    "passed": true,
+    "failure": null,
+    "duration_s": 57.3,
+    "gain_scale": 1.0,
+    "xbox_leg_waist_gain_scale": 1.0,
+    "training_full_body": true,
+    "standing_admission": null,
+    "feedback_torque_mode": "stop",
+    "xbox_forward_acceleration_m_s2": null,
+    "direct_policy_start": true,
+    "coherent_action_send": true,
+    "action_history": "policy_output",
+    "tracked_startup": true,
+    "startup": {
+      "gain_ramp_completed": true,
+      "final_goal_error_rad": 0.205646054347,
+      "joint_settled": false,
+      "held_joint_count": 0,
+      "last_second_gyro_peak_rad_s": 0.12898147789920578,
+      "last_second_tilt_peak_deg": 3.162781092688672,
+      "body_settled": true
+    },
+    "sling_window": true,
+    "walk_020": false,
+    "walk_speed_m_s": 0.0,
+    "operator_events": [
+      "WAITING_FOR_ENABLE",
+      "POLICY_DIRECT",
+      "ENABLED_31",
+      "DISCO_READY",
+      "DISCO_END",
+      "DISABLED_31"
+    ],
+    "sling_checkpoint": {
+      "sling_window_opened": true,
+      "sling_notice_to_blend_ms": 0.0,
+      "sling_checkpoint_sequence": 1000,
+      "sling_checkpoint_joint_frames": 50,
+      "sling_checkpoint_body_frames": 50
+    },
+    "walk_checkpoint": {
+      "walk_checkpoint_sequence": 0,
+      "walk_checkpoint_joint_frames": 0,
+      "walk_checkpoint_body_frames": 0,
+      "walk_joint_settling_required": false,
+      "walk_speed_m_s": 0.0
+    },
+    "can_schedule": {
+      "cpu": 2,
+      "policy": "SCHED_FIFO",
+      "priority": 50
+    },
+    "inference_affinity": {
+      "main_cpu": 4,
+      "ort_worker_cpu": 5,
+      "inference_threads": 2,
+      "io_cpu": 1,
+      "threads": [
+        {
+          "tid": 3862,
+          "cpu": 4
+        },
+        {
+          "tid": 3863,
+          "cpu": 1
+        },
+        {
+          "tid": 3864,
+          "cpu": 5
+        }
+      ],
+      "verified": true
+    },
+    "inference_no_spinning": true,
+    "cpu_frequency": {
+      "requested_khz": 1344000,
+      "acquired": {
+        "status": "acquired",
+        "target_khz": 1344000,
+        "before": {
+          "scaling_min_freq": "729600",
+          "scaling_max_freq": "1344000",
+          "scaling_governor": "schedutil",
+          "related_cpus": "4 5"
+        },
+        "active": {
+          "scaling_min_freq": "1344000",
+          "scaling_max_freq": "1344000",
+          "scaling_governor": "schedutil",
+          "related_cpus": "4 5"
+        },
+        "guard_sha256": "5b2b9a4c25f4f75cf6252a222874798cbe0bd5f9716fac886741be2f594a2ace"
+      },
+      "released": {
+        "status": "restored",
+        "changed": true,
+        "before": {
+          "scaling_min_freq": "729600",
+          "scaling_max_freq": "1344000",
+          "scaling_governor": "schedutil",
+          "related_cpus": "4 5"
+        },
+        "after": {
+          "scaling_min_freq": "729600",
+          "scaling_max_freq": "1344000",
+          "scaling_governor": "schedutil",
+          "related_cpus": "4 5"
+        }
+      }
+    },
+    "timing_max_ms": {
+      "can_feedback": 5.870238,
+      "state_ipc": 0.413476,
+      "actor_preprocess": 0.027296,
+      "inference": 4.221293,
+      "actor_postprocess": 0.013728,
+      "target_ipc": 0.543045,
+      "total": 10.792083
+    },
+    "deadline_stage": "",
+    "velocity_command": [
+      0.0,
+      0,
+      0
+    ],
+    "command_source": "disco_point",
+    "operator_disable_requested": false,
+    "motor_enable_attempts": 31,
+    "final_disabled_count": 31,
+    "fingerprints": {
+      "run_supermimic_commissioning.py": "88e56cc0cc0e03c6fbc0c7bd9d2e4c19ade8df947e02acbe7032d7a167c26d38",
+      "policy.onnx": "2ab5220171e9119028194ce6f0e0700beecfa87deb1af0d8b882340a3ae2de34",
+      "sprite_icm45686": "5636cbda8b5ec7039a68edd1ec8c1eb3d10d575f987c6eea424c71b7d375c703",
+      "sprite_can_shadow": "ef14b65660790defc3b74cf466c7d207c37b706f18508d34f0e071e9ac732c2f",
+      "sprite_supermimic_protected_ipc": "2463d8714910f4c2715663448ec56a43b94ea8a1313e2029eda9d2177ebf8a16",
+      "motors.tsv": "20436269e374ca5671ba6dc439f1611dfee33789b93812590804cfd2cdcf21d4",
+      "kinematics.tsv": "9b47255137997ae1f0da2845be8b8548dae537c1658741469ffe9d3c6ab38cc9",
+      "joints.tsv": "850bfefb763eee4666129a269fac5d68c7be6dd23df085bb00a88ece30e6c56b",
+      "feedback.bin": "d03e9f0c34f8c7f6182474178927b9749699a54c7885a859fdbeffc82111191c",
+      "target.bin": "e1d086c8129cab2f09d3ade7911ef6aeb31f7b6da846db400158a5d571cd4653",
+      "input.bin": "a856485ff7b8e82e618807d9ea0a12b61f7b063729d460bdc7526b534d34b6de",
+      "imu_source": {
+        "backend": "canfd",
+        "interface": "spriteimu0",
+        "usb_port": "1-2.3",
+        "serial": ""
+      },
+      "disco_point_contract.json": "ee4d680f0c2a6c3333c845b14e0841ca51381ce9aa710c30ccf49928203c0b6a",
+      "disco_point_control_profile.json": "184ec989fd24b4bc6ea5034e6fdae796b5b9ce83ef2c884dfe4fc61d8d6987dc",
+      "disco_point_100k.onnx": "c883ae57693e48e2b55c66b461d438face2d0699a442b1d138e2aea972bc6ed7",
+      "disco_point_replay_vectors.npz": "3426085a37b00bf1979b67a0f28a050e7807b27e54e901d6302a5a056a0c4726",
+      "openimu_interface.py": "55fccad0bd67949a2fc2eb9c92885ec3140dc9816891891b454decde47536994",
+      "inference_cpu_frequency_khz": 1344000,
+      "cpu_frequency_client.py": "0e9bf869466aebcd6043a9178c459b58a3752817f349caa68b92012af8976f29",
+      "cpu_frequency_guard.py": "5b2b9a4c25f4f75cf6252a222874798cbe0bd5f9716fac886741be2f594a2ace",
+      "action_tx_audit.py": "79371a8a147b15f02c616367fa55fe5cc2c58c4ae5aebc998819602ad24e3bb8",
+      "loaded_kcan_srcversion": "404E8D65A6EFF60079EAEC1"
+    },
+    "hardware_qualified": false,
+    "powered_walking_ready": false
+  },
+  "actor": {
+    "profile": "supermimic_v5_10f",
+    "mode": "protected_target_ipc",
+    "frames": 2866,
+    "policy_hz": 50,
+    "threads": 2,
+    "warmup_frames": 100,
+    "session_load_ms": 133.75398,
+    "loop_wall_ms": 57676.633749,
+    "ort_version": "1.23.2",
+    "inference_ms": {
+      "mean": 3.26806619505,
+      "p50": 3.57623,
+      "p95": 3.800968,
+      "p99": 3.863849,
+      "max": 4.221293
+    },
+    "service_ms": {
+      "mean": 3.27241090126,
+      "p50": 3.579461,
+      "p95": 3.804552,
+      "p99": 3.868585,
+      "max": 4.227149
+    },
+    "wake_lateness_ms": {
+      "mean": 5.94193004815,
+      "p50": 5.857183,
+      "p95": 6.156193,
+      "p99": 6.173281,
+      "max": 6.213922
+    },
+    "finish_lateness_ms": {
+      "mean": 9.22426840126,
+      "p50": 9.416324,
+      "p95": 9.853256,
+      "p99": 9.988778,
+      "max": 10.35195
+    },
+    "state_age_ms": {
+      "mean": 5.94193004815,
+      "p50": 5.857183,
+      "p95": 6.156193,
+      "p99": 6.173281,
+      "max": 6.213922
+    },
+    "imu_age_ms": {
+      "mean": 0.64901877739,
+      "p50": 0.645084,
+      "p95": 1.212514,
+      "p99": 1.273262,
+      "max": 2.459386
+    },
+    "state_socket_transmitted_bytes": 3668480,
+    "maximum_target_kp": 150,
+    "gain_ramp_completed": true,
+    "final_gain_ramp_alpha": 1,
+    "tracked_startup": true,
+    "xbox_full_leg_waist_gains": false,
+    "training_full_body": true,
+    "direct_policy_start": true,
+    "formal_policy_frames": 2865,
+    "action_history": "policy_output",
+    "walk_speed_m_s": 0,
+    "gamepad_preview": false,
+    "gamepad_control": false,
+    "standing_groove_frames": 0,
+    "disco_point_frames": 1640,
+    "startup_final_tracking_error_rad": 0.205646054347,
+    "startup_final_goal_error_rad": 0.205646054347,
+    "startup_stable_frames": 0,
+    "startup_settled": false,
+    "projected_target_joint_frames": 241,
+    "maximum_joint_target_overshoot_rad": 0.287664301634,
+    "imu_kind": "icm",
+    "deadline_misses": 0,
+    "hardware_tx": 0,
+    "live_devices_opened": 0
+  },
+  "tx_audit": {
+    "passed": true,
+    "groups": 2865,
+    "motor_dispatches": 88815,
+    "whole_group_driver_span_max_ms": 0.315939,
+    "per_bus_hardware_span_max_ms": 0.946,
+    "actor_target_to_driver_upper_max_ms": 0.928681,
+    "accept_to_driver_upper_max_ms": 0.498277,
+    "oldest_feedback_to_driver_upper_max_ms": 11.179735,
+    "physical_tx_delay_upper_max_ms": 2.564828,
+    "final_disabled_count": 31,
+    "limitations": [
+      "Driver TX is not motor execution acknowledgement.",
+      "Physical TX host-time bounds use send-call entry and hardware completion receipt; no cross-clock subtraction.",
+      "Raw hardware clock is not assumed synchronized between adapters or with the host.",
+      "Disabled validation measures zero-gain frame transport, not powered motion."
+    ]
+  },
+  "can_deadline_misses": 0,
+  "disabled_by_motor": {
+    "left_hip_pitch_motor": true,
+    "left_hip_roll_motor": true,
+    "left_hip_yaw_motor": true,
+    "left_knee_motor": true,
+    "left_ankle_motor_a": true,
+    "left_ankle_motor_b": true,
+    "waist_yaw_motor": true,
+    "waist_roll_motor": true,
+    "right_hip_pitch_motor": true,
+    "right_hip_roll_motor": true,
+    "right_hip_yaw_motor": true,
+    "right_knee_motor": true,
+    "right_ankle_motor_a": true,
+    "right_ankle_motor_b": true,
+    "head_motor_a": true,
+    "head_motor_b": true,
+    "left_shoulder_pitch_motor": true,
+    "left_shoulder_roll_motor": true,
+    "left_shoulder_yaw_motor": true,
+    "left_elbow_motor": true,
+    "left_wrist_yaw_motor": true,
+    "left_wrist_pitch_motor": true,
+    "left_wrist_roll_motor": true,
+    "head_yaw_motor": true,
+    "right_shoulder_pitch_motor": true,
+    "right_shoulder_roll_motor": true,
+    "right_shoulder_yaw_motor": true,
+    "right_elbow_motor": true,
+    "right_wrist_yaw_motor": true,
+    "right_wrist_pitch_motor": true,
+    "right_wrist_roll_motor": true
+  }
+}

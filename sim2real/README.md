@@ -63,6 +63,34 @@ Other [253 launchers](../scripts/) and the [initial preflight and trace analysis
 
 The [实验室 Codex 交接说明](DISCO_POINT_LAB_HANDOFF.md) lists the 1,640-frame policy, native runtime changes and acceptance checks for the first powered trial.
 
+On Jetson 253 the release from `8b3b06b` passed its package checksums and Python CPU replay (1,640 frames, maximum raw action error 0.00001383, inference p99 3.873 ms). The protected C++ actor compared all 50,840 raw actions twice. Maximum absolute error was 0.00001383 with recorded histories and 0.00001287 with histories rebuilt from feedback and the actor's own outputs. The existing 600-frame Standing Groove replay and 803-frame walking hash also passed. [Disco Point per-frame errors and binary fingerprints](evidence/disco-point-native-253.json)
+
+Run from the checkout root on 253. Running the launcher without arguments performs file-only replay. With the Xbox controller connected, the reviewed KCAN driver loaded and OpenIMU active, run the disabled qualification on the supported robot.
+
+```bash
+bash scripts/disco-point-253.sh --replay
+bash scripts/disco-point-253.sh --qualify canfd
+```
+
+Qualification verifies the complete 57.3-second schedule and then exercises the 20 ms deadline guard in a separate disabled run. The powered launcher requires both matching reports. After a battery change and Jetson reboot, reconnect the controller and run from the operator terminal with the sling in place and the motor cutoff within reach.
+
+```bash
+sudo bash scripts/load-kcan-253.sh &&
+sudo python3 runtime/tools/openimu_interface.py --up &&
+bash scripts/disco-point-253.sh --powered canfd
+```
+
+Enter `DISCO1640` at the onsite confirmation prompt. After the 20-second standing checkpoint, the actor plays frames 0 through 1,639 at 50 Hz and hands back to zero-velocity standing over 10 policy frames (0.2 seconds) starting from the measured joint positions. Hold LB and RB together for three seconds to request disable at any time during powered control. The controller checks disable feedback from all 31 drives.
+
+Both disabled qualification phases passed on the 10-frame build. The normal run covered all 1,640 dance frames. In the fault run the CAN controller detected the injected 20 ms timeout while waiting for an actor target. Both phases recorded zero enable attempts and 31 individual disable confirmations. [Qualification and build fingerprints](evidence/disco-point-qualification-253.json)
+
+| Powered trial | Return duration | Peak tilt, first 2 s of return | Peak angular speed, final 1 s | Final body-settling check |
+| --- | ---: | ---: | ---: | --- |
+| `disco-point-HOezDo` | 2.0 s | 26.20° | 1.499 rad/s | Failed |
+| `disco-point-I8Tlr6` | 0.2 s | 4.66° | 0.129 rad/s | Passed |
+
+In the 0.2-second trial, the final one-second tilt peak was 3.16°. The settling limits are 10° and 0.15 rad/s. The actor and CAN controller recorded zero deadline misses, the TX audit passed for all 2,865 action groups, and all 31 drives confirmed disabled. [Powered trial report](evidence/disco-point-return10-powered-253.json)
+
 ### Standing groove on Jetson 253
 
 The dedicated `scripts/standing-groove-253.sh` launcher defaults to offline replay. It uses the protected actor binary to compare all 600 frames and 31 raw actions per frame with the packaged MLX reference. A second pass rebuilds each ten-frame history from the current recorded state and the native actor's own preceding raw action. Both passes use the release tolerances of `atol=rtol=2e-4`. The report is saved as `sim2real/build/jetson253/groove-native-600.json`.

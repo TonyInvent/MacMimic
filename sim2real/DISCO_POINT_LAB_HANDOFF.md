@@ -1,5 +1,7 @@
 # 实验室交接 · OpenSprite v5 迪斯科斜指
 
+**November 27, 2026 update.** The Jetson 253 powered trial passed with OpenIMU CAN FD and a 0.2-second return to standing. The original handoff below describes the initial two-second design. [Validated launcher and results](README.md#disco-point-on-jetson-253)
+
 **任务**　在 Jetson 253 上接入 Disco Point，让现场操作员从命令行启动，在吊架上做一遍 32.8 秒的斜指舞，结束后回到站姿并确认 31 个驱动全部失能。舞蹈由策略逐帧播放，Xbox 只保留操作员停机功能。模型已经导出，接手从离线回放开始。
 
 | 截至发布提交 `8e8de2d` | 已有结果 |

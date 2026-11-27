@@ -14,12 +14,12 @@
 #include "policy_imu_client.hpp"
 #include "policy_feedback.hpp"
 #ifdef SPRITE_SUPERMIMIC_PROTECTED_IPC
-#include "sling_window.hpp"
 #include <csignal>
 #include <fcntl.h>
 #endif
 #endif
 #include <onnxruntime_cxx_api.h>
+#include "sling_window.hpp"
 #include "standing_groove.hpp"
 #include "inference_diagnostics.hpp"
 #include "inference_cpu_layout.hpp"
@@ -121,9 +121,12 @@ int main(int argc,char** argv) {
   std::vector<StartupSample> startup_trace;
 #endif
   try {
-    if(argc==5 && (std::string(argv[1])=="--replay-standing-groove" ||
-                   std::string(argv[1])=="--replay-standing-groove-feedback")) {
-      sprite_policy::replay_groove(argv[2],argv[3],argv[4],std::string(argv[1])=="--replay-standing-groove-feedback");
+    const std::string first_option=argc>1?argv[1]:"";
+    const bool disco_replay=first_option=="--replay-disco-point" || first_option=="--replay-disco-point-feedback";
+    if(argc==5 && (disco_replay || first_option=="--replay-standing-groove" ||
+                   first_option=="--replay-standing-groove-feedback")) {
+      sprite_policy::replay_groove(argv[2],argv[3],argv[4],first_option.find("-feedback")!=std::string::npos,
+                                   disco_replay?sprite_policy::kDiscoFrames:sprite_policy::kGrooveFrames);
       return 0;
     }
     if(argc<4)throw std::runtime_error("Usage: sprite_supermimic_replay MODEL FIXTURE OUTPUT [--benchmark] [--threads N] [--warmup N]");
@@ -143,6 +146,7 @@ int main(int argc,char** argv) {
     std::string gamepad_preview_device;
     std::string gamepad_control_device;
     std::string groove_model;
+    bool disco_point=false;
     int sling_ready_fd=-1;
 #endif
     for(int i=4;i<argc;++i) {
@@ -160,7 +164,11 @@ int main(int argc,char** argv) {
       else if(option=="--direct-policy-start")direct_policy_start=true;
       else if(option=="--gamepad-preview-device" && i+1<argc)gamepad_preview_device=argv[++i];
       else if(option=="--gamepad-control-device" && i+1<argc)gamepad_control_device=argv[++i];
-      else if(option=="--standing-groove" && i+1<argc)groove_model=argv[++i];
+      else if((option=="--standing-groove" || option=="--disco-point") && i+1<argc) {
+        if(!groove_model.empty())throw std::runtime_error("Only one choreography may be selected");
+        disco_point=option=="--disco-point";
+        groove_model=argv[++i];
+      }
       else if(option=="--walk-020" || option=="--walk-025" || option=="--walk-030") {
         if(walk_speed>0.)throw std::runtime_error("only one walking profile can be selected");
         walk_speed=option=="--walk-020"?.20:option=="--walk-025"?.25:.30;
@@ -252,7 +260,7 @@ int main(int argc,char** argv) {
     std::uint64_t body_stable_frames=0;
     if(sling_ready_fd>=0) {
       const int flags=fcntl(sling_ready_fd,F_GETFL);
-      const auto duration=!groove_model.empty()?sprite_policy::kGrooveDurationSeconds:!gamepad_control_device.empty()?sprite_policy::kXboxDurationSeconds:
+      const auto duration=disco_point?sprite_policy::kDiscoDurationSeconds:!groove_model.empty()?sprite_policy::kGrooveDurationSeconds:!gamepad_control_device.empty()?sprite_policy::kXboxDurationSeconds:
           walk_speed>0.?sprite_policy::kWalkDurationSeconds:sprite_policy::kSlingDurationSeconds;
       if(!tracked_startup || count!=duration*50+1 ||
          flags<0 || !(flags&O_NONBLOCK) || (flags&O_ACCMODE)!=O_WRONLY)
@@ -317,7 +325,7 @@ int main(int argc,char** argv) {
     std::optional<sprite_policy::StandingGroove> groove;
     int groove_frames=0;
     if(!groove_model.empty()) {
-      groove.emplace(env,groove_model.c_str());
+      groove.emplace(env,groove_model.c_str(),disco_point?sprite_policy::kDiscoFrames:sprite_policy::kGrooveFrames);
       std::array<float,31> scratch{};
       for(int i=0;i<warmup;++i)groove->infer({},0,scratch);
     }
@@ -458,11 +466,12 @@ int main(int argc,char** argv) {
       const bool handshake_only=direct_policy_start && i==0;
       if(direct_policy_start && i==1) { core.reset_episode(); if(!macmimic_100k)core.steps=0; }
       const auto groove_start=sprite_policy::kGrooveStartFrame;
-      const auto groove_end=groove_start+sprite_policy::StandingGroove::frames;
+      const auto groove_end=groove_start+(groove?groove->frames:0);
       const bool dancing=groove && i>=groove_start && i<groove_end;
       if(groove && (i==groove_start || i==groove_end)) {
         core.reset_episode();
-        core.steps=i==groove_start?0:100;
+        const int return_frames = disco_point ? 10 : 100;
+        core.steps = i == groove_start ? 0 : return_frames;
       }
 #endif
       record.obs=core.observe(inputs[i]);
@@ -632,7 +641,8 @@ int main(int argc,char** argv) {
           <<",\"walk_speed_m_s\":"<<walk_speed
           <<",\"gamepad_preview\":"<<(!gamepad_preview_device.empty()?"true":"false")
           <<",\"gamepad_control\":"<<(!gamepad_control_device.empty() && !groove?"true":"false")
-          <<",\"standing_groove_frames\":"<<groove_frames
+          <<",\"standing_groove_frames\":"<<(disco_point?0:groove_frames)
+          <<",\"disco_point_frames\":"<<(disco_point?groove_frames:0)
           <<",\"startup_final_tracking_error_rad\":"<<(tracked?tracked->tracking_error_rad:0.)
           <<",\"startup_final_goal_error_rad\":"<<(tracked?tracked->goal_error_rad:0.)
           <<",\"startup_stable_frames\":"<<(tracked?tracked->stable_frames():0)

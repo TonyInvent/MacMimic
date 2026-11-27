@@ -21,8 +21,8 @@ class StandingGroove {
     Ort::Session session_;
     Ort::MemoryInfo memory_=Ort::MemoryInfo::CreateCpu(OrtArenaAllocator,OrtMemTypeDefault);
 public:
-    static constexpr int frames=600;
-    StandingGroove(Ort::Env& env,const char* path):session_(env,path,options()) {
+    const int frames;
+    StandingGroove(Ort::Env& env,const char* path,int count):session_(env,path,options()),frames(count) {
         Ort::AllocatorWithDefaultOptions allocator;
         auto check=[](const Ort::TypeInfo& info,ONNXTensorElementDataType type,std::vector<int64_t> shape) {
             auto tensor=info.GetTensorTypeAndShapeInfo();
@@ -58,9 +58,9 @@ public:
     }
 };
 
-inline void replay_groove(const char* model,const char* fixture,const char* result,bool feedback) {
+inline void replay_groove(const char* model,const char* fixture,const char* result,bool feedback,int frames) {
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING,"standing-groove-replay");
-    StandingGroove groove(env,model);
+    StandingGroove groove(env,model,frames);
     std::ifstream input(fixture,std::ios::binary);
     std::ofstream output(result,std::ios::binary);
     auto read=[&](auto& array) {
@@ -72,7 +72,7 @@ inline void replay_groove(const char* model,const char* fixture,const char* resu
         read(core.scale);
         core.offset=core.defaults;
     }
-    for(int i=0;i<StandingGroove::frames;++i) {
+    for(int i=0;i<frames;++i) {
         std::array<float,993> packed;
         std::array<float,31> raw;
         std::array<double,71> state{};
