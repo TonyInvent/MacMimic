@@ -27,6 +27,22 @@ int main() {
   bool rejected=false;
   try {trace.stamp(2,1,0);} catch(const std::runtime_error&) {rejected=true;}
   assert(rejected);
+  const std::array<std::uint8_t,8> payload{1,2,3,4,5,6,7,8};
+  ActionTxTrace echo;
+  echo.prepare();
+  echo.context={2,10,20,true,false};
+  echo.sent(7,30,31,0,payload.data());
+  auto wrong=payload;
+  wrong[7]=0;
+  rejected=false;
+  try {echo.confirm_echo(7,wrong.data(),40);} catch(const std::runtime_error&) {rejected=true;}
+  assert(rejected);
+  echo.confirm_echo(7,payload.data(),42);
+  assert(echo.events[0].echo_received_ns==42 && echo.events[0].hardware_raw_ns==0);
+  echo.sent(8,50,51,0,payload.data());
+  rejected=false;
+  try {echo.confirm_echo(8,payload.data(),20'000'010);} catch(const std::runtime_error&) {rejected=true;}
+  assert(rejected);
   // Exceed the old limit while retaining every packet identity without reallocation.
   const auto* allocation = trace.events.data();
   for (int i=2; i<650000; ++i) trace.sent(7, 30, 31);

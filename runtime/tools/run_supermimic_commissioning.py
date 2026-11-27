@@ -6,6 +6,7 @@ import fcntl
 import json
 import math
 import os
+import platform
 from pathlib import Path
 import signal
 import struct
@@ -340,7 +341,12 @@ def imu_capture(args, seconds, output):
             raise ValueError("--imu-can-interface requires --imu-backend canfd")
         return (["capture", "/dev/spidev0.0", "/dev/gpiochip0", "123", "800", seconds,
                  output, "X_DOWN_Z_BACK", "CONFIGURE_ICM45686_RAW_NO_CAN"], {"backend": "spi"})
-    adapter = find_openimu(args.imu_can_interface)
+    if args.k3:
+        from k3_board import endpoint
+        adapter = endpoint("can4")
+        adapter["backend"] = "canfd"
+    else:
+        adapter = find_openimu(args.imu_can_interface)
     return ["capture-canfd", adapter["interface"], seconds, output], adapter
 
 
@@ -388,6 +394,9 @@ def run(args, out, mode):
         if args.training_full_body:
             reviewed = apply_training_gains(out/"joints.tsv", reviewed, contract)
         target_path.write_bytes(b"SPMTGT02" + reviewed[8:] + roles)
+    if args.k3:
+        from k3_board import MOTOR_BUSES, endpoint, remap_motor_table
+        remap_motor_table(out/"motors.tsv")
     fingerprints = {p.name: file_sha256(p) for p in (
         Path(__file__), model, args.icm, can_binary, actor_binary, out/"motors.tsv",
         out/"kinematics.tsv", out/"joints.tsv", out/"feedback.bin", out/"target.bin", out/"input.bin")}
@@ -411,7 +420,11 @@ def run(args, out, mode):
     if args.coherent_action_send:
         tx_audit_path = Path(__file__).with_name('action_tx_audit.py')
         fingerprints[tx_audit_path.name] = file_sha256(tx_audit_path)
-        fingerprints['loaded_kcan_srcversion'] = Path('/sys/module/kcan/srcversion').read_text().strip()
+        if args.k3:
+            fingerprints["k3_kernel"] = platform.release()
+            fingerprints["k3_motor_endpoints"] = [endpoint(name) for name in MOTOR_BUSES.values()]
+        else:
+            fingerprints['loaded_kcan_srcversion'] = Path('/sys/module/kcan/srcversion').read_text().strip()
     standing_admission = None
     if mode == "powered" or args.check_saved_evidence:
         if args.walk_speed:
@@ -440,6 +453,8 @@ def run(args, out, mode):
         return 0
 
     interfaces = json.loads(args.hardware.read_text())["can_adapter"]["interfaces"]
+    if args.k3:
+        interfaces = [MOTOR_BUSES[n] for n in interfaces]
     def snapshot(name):
         raw = subprocess.check_output(["ip", "-j", "-d", "-s", "link", "show", "type", "can"])
         (out/name).write_bytes(raw)
@@ -552,7 +567,7 @@ def run(args, out, mode):
             ack = "ENABLE_SUPERMIMIC_MACMIMIC_XBOX_300S_070" if mode == "powered" else "PREVIEW_SUPERMIMIC_MACMIMIC_XBOX_300S_070"
         if args.motion_package:
             ack = ("ENABLE_" if mode == "powered" else "PREVIEW_") + ("DISCO_POINT_32S8" if args.disco_point else "STANDING_GROOVE_12S")
-        can = launch("can", [can_binary, "--supermimic-commissioning", *options, *tracking, *direct, *coherent, *walking, *can_status,
+        can = launch("can", [can_binary, "--supermimic-commissioning", *(["--flexcan-echo"] if args.k3 else []), *options, *tracking, *direct, *coherent, *walking, *can_status,
             "--acknowledge-hardware-tx", ack, "--all-motors-disabled-confirmed", "--config", out/"motors.tsv",
             "--kinematics-config", out/"kinematics.tsv", "--joint-safety-config", out/"joints.tsv",
             "--duration", args.duration, "--cpu", CAN_CPU, "--realtime-priority", CAN_REALTIME_PRIORITY,
@@ -627,6 +642,8 @@ def run(args, out, mode):
             raise RuntimeError("CAN walking profile differs from admission")
         if report.get("direct_policy_start", False) != args.direct_policy_start:
             raise RuntimeError("CAN startup mode differs from admission")
+        if report.get("flexcan_echo", False) != args.k3:
+            raise RuntimeError("CAN completion source differs from admission")
         if report.get("coherent_action_send", False) != args.coherent_action_send:
             raise RuntimeError("CAN coherent-action mode differs from admission")
         if report.get("xbox_body_admission", False) != bool(args.gamepad_control_device):
@@ -861,6 +878,7 @@ def run(args, out, mode):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--k3", action="store_true", help="Use COM260 native FlexCAN and OpenIMU on can4")
     parser.add_argument("--imu-backend", choices=("canfd", "spi"), default="canfd")
     parser.add_argument("--imu-can-interface", help="select the OpenIMU PCAN-USB FD interface")
     parser.add_argument("--duration", type=int, choices=(2, 6, 10), default=2)
@@ -900,6 +918,9 @@ def main():
                           help="full-body zero-speed evidence stopped only by all-joint settling")
     parser.add_argument("--operator-status", type=Path)
     args = parser.parse_args()
+    if args.k3 and (args.imu_backend != "canfd" or args.imu_can_interface not in (None, "can4") or
+                    not (args.coherent_action_send and args.training_full_body and args.tracked_startup)):
+        parser.error("K3 requires OpenIMU can4 and the reviewed coherent full-body profile")
     args.motion_package = args.disco_point or args.standing_groove
     if args.motion_package and (args.gamepad_control_device or args.gamepad_preview_device or args.walk_speed or
                                  not (args.direct_policy_start and args.coherent_action_send and args.sling_window)):

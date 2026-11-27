@@ -40,6 +40,7 @@ def audit(folder):
         assert all(a['sequence']<=b['sequence'] for a,b in zip(active,active[1:])), 'old action sent after new one'
         physical=sorted((r for r in active if r['hardware_raw_ns']),key=lambda r:r['hardware_raw_ns'])
         assert all(a['sequence']<=b['sequence'] for a,b in zip(physical,physical[1:])), 'hardware sent old action after new one'
+    flexcan = can.get('flexcan_echo', False)
     output=[]
     spans=[]
     hardware_spans=[]
@@ -49,8 +50,12 @@ def audit(folder):
         low=[];high=[]
         for r in group:
             assert r['software_realtime_ns']>0, 'missing driver TX timestamp'
-            assert r['hardware_raw_ns']>0, 'missing adapter TX timestamp'
-            assert r['hardware_received_ns']>=r['call_begin_ns'], 'invalid hardware completion receipt'
+            if flexcan:
+                completion = r['echo_received_ns']
+            else:
+                assert r['hardware_raw_ns']>0, 'missing adapter TX timestamp'
+                completion = r['hardware_received_ns']
+            assert completion >= r['call_begin_ns'], 'missing or invalid TX completion receipt'
             assert r['powered']==int(can['motor_enable_attempts']>0)
             t=timing[seq]
             assert r['feedback_ns']==int(t['feedback_ns']) and r['accept_ns']==int(t['accept_ns'])
@@ -59,18 +64,21 @@ def audit(folder):
             upper=r['call_end_ns']+delta
             assert upper>=lower and lower>=r['accept_ns']
             assert upper-r['feedback_ns']<20_000_000, 'oldest-feedback to driver TX exceeds original 20 ms'
-            assert r['hardware_received_ns']-r['feedback_ns']<20_000_000, 'hardware TX completion not confirmed within 20 ms'
+            assert completion-r['feedback_ns']<20_000_000, 'hardware TX completion not confirmed within 20 ms'
             assert r['call_begin_ns']-r['accept_ns']<2_500_000, 'action waited beyond next mapping boundary'
             low.append(lower);high.append(upper)
-            hardware[r['interface']].append(r['hardware_raw_ns'])
+            if flexcan:
+                hardware[r['interface']].extend((r['call_begin_ns'],completion))
+            else:
+                hardware[r['interface']].append(r['hardware_raw_ns'])
             output.append(dict(sequence=seq,motor=names[r['interface'],r['motor_id']],
                 actor_target_to_driver_upper_ms=(upper-int(t['actor_target_ns']))/1e6,
                 accept_to_driver_upper_ms=(upper-r['accept_ns'])/1e6,
                 oldest_feedback_to_driver_upper_ms=(upper-r['feedback_ns'])/1e6,
                 driver_mono_lower_ns=lower,driver_mono_upper_ns=upper,
                 physical_tx_delay_lower_ms=(r['call_begin_ns']-int(t['actor_target_ns']))/1e6,
-                physical_tx_delay_upper_ms=(r['hardware_received_ns']-int(t['actor_target_ns']))/1e6,
-                physical_tx_mono_lower_ns=r['call_begin_ns'],physical_tx_mono_upper_ns=r['hardware_received_ns'],
+                physical_tx_delay_upper_ms=(completion-int(t['actor_target_ns']))/1e6,
+                physical_tx_mono_lower_ns=r['call_begin_ns'],physical_tx_mono_upper_ns=completion,
                 hardware_raw_ns=r['hardware_raw_ns']))
         spans.append((max(high)-min(low))/1e6)
         hardware_spans.extend((max(v)-min(v))/1e6 for v in hardware.values())
@@ -90,6 +98,10 @@ def audit(folder):
                     'Physical TX host-time bounds use send-call entry and hardware completion receipt; no cross-clock subtraction.',
                     'Raw hardware clock is not assumed synchronized between adapters or with the host.',
                     'Disabled validation measures zero-gain frame transport, not powered motion.'])
+    if flexcan:
+        summary['per_bus_echo_span_upper_max_ms'] = summary.pop('per_bus_hardware_span_max_ms')
+        summary['completion_source'] = 'flexcan_driver_echo'
+        summary['limitations'][1:3] = ['Completion bounds use send-call entry and receipt of the matched FlexCAN driver echo.']
     assert summary['final_disabled_count']==31
     (folder/'action-tx-audit.json').write_text(json.dumps(summary,indent=2)+'\n')
     return summary

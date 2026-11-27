@@ -7,6 +7,7 @@
 #include <cstring>
 #include <deque>
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -206,6 +207,7 @@ struct Options {
   bool tracked_startup = false;
   bool direct_policy_start = false;
   bool coherent_action_send = false;
+  bool flexcan_echo = false;
   bool xbox_body_admission = false;
   bool choreography = false;
   bool disco_point = false;
@@ -218,6 +220,7 @@ struct Socket {
   std::string interface;
   int fd = -1;
   sprite_policy::ActionTxTrace tx_trace;
+  bool flexcan_echo=false;
 };
 
 struct PolicyCycleTiming {
@@ -580,6 +583,7 @@ Options parse_options(int argc, char** argv) {
     else if (argument == "--supermimic-commissioning") result.supermimic_commissioning = true;
     else if (argument == "--tracked-startup") result.tracked_startup = true;
     else if (argument == "--direct-policy-start") result.direct_policy_start = true;
+    else if (argument == "--flexcan-echo") result.flexcan_echo = true;
     else if (argument == "--coherent-action-send") result.coherent_action_send = true;
     else if (argument == "--xbox-body-admission") result.xbox_body_admission = true;
     else if (argument == "--standing-groove" || argument == "--disco-point") {
@@ -618,6 +622,7 @@ Options parse_options(int argc, char** argv) {
   }
   if (result.direct_policy_start && !result.tracked_startup)
     throw std::runtime_error("direct policy start requires protected tracked transport");
+  if (result.flexcan_echo && !result.coherent_action_send) throw std::runtime_error("FlexCAN echoes require coherent action groups");
   if (result.coherent_action_send && !result.direct_policy_start)
     throw std::runtime_error("coherent send requires direct protected control");
   if (result.supermimic_commissioning && result.realtime_priority != kSuperMimicRealtimePriority) {
@@ -784,7 +789,7 @@ std::array<std::uint8_t, 8> zero_gain_payload(const Motor& motor) {
   return data;
 }
 
-Socket open_socket(const std::string& interface, bool timestamp_feedback = false, bool trace_tx = false) {
+Socket open_socket(const std::string& interface, bool timestamp_feedback = false, bool trace_tx = false, bool flexcan_echo = false) {
   const int fd = socket(PF_CAN, SOCK_RAW | SOCK_NONBLOCK, CAN_RAW);
   if (fd < 0) throw std::runtime_error("failed to open CAN socket");
   int enable_fd = 1;
@@ -795,7 +800,18 @@ Socket open_socket(const std::string& interface, bool timestamp_feedback = false
   if (timestamp_feedback) {
     int flags = SOF_TIMESTAMPING_RX_HARDWARE | SOF_TIMESTAMPING_RX_SOFTWARE |
                 SOF_TIMESTAMPING_SOFTWARE | SOF_TIMESTAMPING_RAW_HARDWARE;
-    if(trace_tx) flags |= SOF_TIMESTAMPING_TX_HARDWARE | SOF_TIMESTAMPING_TX_SOFTWARE |
+    if (flexcan_echo) {
+      const auto net=std::filesystem::path("/sys/class/net")/interface;
+      unsigned flags_net=0;
+      std::ifstream(net/"flags") >> std::hex >> flags_net;
+      if (std::filesystem::canonical(net/"device/driver").filename()!="flexcan" ||
+          !(flags_net & 0x40000U) || // IFF_ECHO, required for driver-level completion
+          setsockopt(fd,SOL_CAN_RAW,CAN_RAW_RECV_OWN_MSGS,&enable_fd,sizeof(enable_fd)))
+        throw std::runtime_error("FlexCAN driver TX echoes unavailable");
+      flags=SOF_TIMESTAMPING_RX_SOFTWARE | SOF_TIMESTAMPING_SOFTWARE |
+            SOF_TIMESTAMPING_TX_SOFTWARE | SOF_TIMESTAMPING_OPT_ID | SOF_TIMESTAMPING_OPT_TSONLY;
+    }
+    if(trace_tx && !flexcan_echo) flags |= SOF_TIMESTAMPING_TX_HARDWARE | SOF_TIMESTAMPING_TX_SOFTWARE |
                          SOF_TIMESTAMPING_OPT_ID | SOF_TIMESTAMPING_OPT_TSONLY |
                          SOF_TIMESTAMPING_OPT_TX_SWHW;
     if (setsockopt(fd, SOL_SOCKET, SO_TIMESTAMPING, &flags, sizeof(flags)) != 0) {
@@ -816,7 +832,7 @@ Socket open_socket(const std::string& interface, bool timestamp_feedback = false
     close(fd);
     throw std::runtime_error("failed to bind CAN interface: " + interface);
   }
-  if (trace_tx) {
+  if (trace_tx && !flexcan_echo) {
     hwtstamp_config config{};
     request.ifr_data = reinterpret_cast<char*>(&config);
     if (ioctl(fd, SIOCGHWTSTAMP, &request) || config.tx_type != HWTSTAMP_TX_ON ||
@@ -828,6 +844,7 @@ Socket open_socket(const std::string& interface, bool timestamp_feedback = false
   Socket result;
   result.interface = interface;
   result.fd = fd;
+  result.flexcan_echo=flexcan_echo;
   if (trace_tx) result.tx_trace.prepare();
   return result;
 }
@@ -1239,7 +1256,7 @@ void send_poll(Socket& socket, Motor& motor) {
         "CAN-FD zero-gain write failed for " + motor.name + ": " + std::strerror(errno));
   }
   ++motor.tx_count;
-  socket.tx_trace.sent(motor.can_id, begin, socket.tx_trace.enabled ? monotonic_ns() : 0, realtime);
+  socket.tx_trace.sent(motor.can_id, begin, socket.tx_trace.enabled ? monotonic_ns() : 0, realtime, frame.data);
 }
 
 std::array<std::uint8_t, 8> hold_payload(
@@ -1378,7 +1395,7 @@ void send_payload(Socket& socket, Motor& motor,
     throw std::runtime_error("CAN-FD hold write failed for " + motor.name);
   }
   ++motor.tx_count;
-  socket.tx_trace.sent(motor.can_id, begin, socket.tx_trace.enabled ? monotonic_ns() : 0, realtime);
+  socket.tx_trace.sent(motor.can_id, begin, socket.tx_trace.enabled ? monotonic_ns() : 0, realtime, frame.data);
 }
 
 void send_special(Socket& socket, Motor& motor, std::uint8_t opcode) {
@@ -1522,7 +1539,7 @@ void update_temperature_filter(Motor& motor, double mos_c, double rotor_c) {
       motor.maximum_filtered_rotor_temperature, motor.filtered_rotor_temperature);
 }
 
-ssize_t read_timestamped_feedback(int fd, canfd_frame& frame, std::int64_t& feedback_ns) {
+ssize_t read_timestamped_feedback(Socket& socket, canfd_frame& frame, std::int64_t& feedback_ns, bool timestamp_feedback, bool& echo) {
   alignas(cmsghdr) std::array<unsigned char, CMSG_SPACE(3 * sizeof(timespec))> control{};
   iovec buffer{&frame, sizeof(frame)};
   msghdr message{};
@@ -1530,17 +1547,28 @@ ssize_t read_timestamped_feedback(int fd, canfd_frame& frame, std::int64_t& feed
   message.msg_iovlen = 1;
   message.msg_control = control.data();
   message.msg_controllen = control.size();
-  const auto size = recvmsg(fd, &message, MSG_DONTWAIT);
+  const auto size = recvmsg(socket.fd, &message, MSG_DONTWAIT);
   if (size != CANFD_MTU) return size;
   if (message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) {
     throw std::runtime_error("truncated kernel CAN feedback timestamp");
   }
+  if (socket.flexcan_echo && (message.msg_flags & MSG_CONFIRM)) {
+    if (frame.len != 8 || !(frame.flags & CANFD_BRS)) throw std::runtime_error("invalid FlexCAN TX echo");
+    if (timestamp_feedback) socket.tx_trace.confirm_echo(frame.can_id,frame.data,monotonic_ns());
+    else {
+      try { socket.tx_trace.confirm_echo(frame.can_id,frame.data,monotonic_ns()); }
+      catch (const std::exception&) { /* An unmatched echo leaves the TX audit incomplete. */ }
+    }
+    echo=true;
+    return size;
+  }
+  if (!timestamp_feedback) return size;
   for (auto* header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
     if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SO_TIMESTAMPING ||
         header->cmsg_len < CMSG_LEN(3 * sizeof(timespec))) continue;
     std::array<timespec, 3> stamp{};
     std::memcpy(stamp.data(), CMSG_DATA(header), sizeof(stamp));
-    if ((!stamp[2].tv_sec && !stamp[2].tv_nsec) || !stamp[0].tv_sec) break;
+    if ((!socket.flexcan_echo && !stamp[2].tv_sec && !stamp[2].tv_nsec) || !stamp[0].tv_sec) break;
     // Software RX is in CLOCK_REALTIME. Sample monotonic first so conversion
     // includes userspace dequeue delay and errs toward an older source stamp.
     const auto now_ns = monotonic_ns();
@@ -1589,9 +1617,11 @@ void drain_policy_feedback(
     while (true) {
       canfd_frame frame{};
       std::int64_t feedback_ns = 0;
-      const ssize_t received = timestamp_feedback
-          ? read_timestamped_feedback(can_socket.fd, frame, feedback_ns)
+      bool echo=false;
+      const ssize_t received = (timestamp_feedback || can_socket.flexcan_echo)
+          ? read_timestamped_feedback(can_socket, frame, feedback_ns, timestamp_feedback, echo)
           : read(can_socket.fd, &frame, CANFD_MTU);
+      if (echo) continue;
       if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
       if (received < 0 && expected_status < 0 && !enforce_dynamic_guards) break;
       if (received != CANFD_MTU || frame.len != 8 || (frame.flags & CANFD_BRS) == 0) {
@@ -2387,6 +2417,7 @@ int run_native_protected_policy(
       << "  \"pd_position_saturation\": " << (pd_position_saturation ? "true" : "false") << ",\n"
       << "  \"tracked_startup\": " << (options.tracked_startup ? "true" : "false") << ",\n"
       << "  \"direct_policy_start\": " << (options.direct_policy_start ? "true" : "false") << ",\n"
+      << "  \"flexcan_echo\": " << (options.flexcan_echo ? "true" : "false") << ",\n"
       << "  \"coherent_action_send\": " << (options.coherent_action_send ? "true" : "false") << ",\n"
       << "  \"coherent_action_groups\": " << coherent_groups << ",\n"
       << "  \"sling_window_opened\": " << (sling_window_opened ? "true" : "false") << ",\n"
@@ -2461,13 +2492,13 @@ int run_native_protected_policy(
   output << report.str();
   if (options.coherent_action_send) {
     std::ofstream trace(options.output + ".tx.csv");
-    trace << "interface,packet_id,motor_id,sequence,feedback_ns,accept_ns,group,powered,call_begin_ns,call_end_ns,realtime_before_ns,software_realtime_ns,hardware_raw_ns,hardware_received_ns\n";
+    trace << "interface,packet_id,motor_id,sequence,feedback_ns,accept_ns,group,powered,call_begin_ns,call_end_ns,realtime_before_ns,software_realtime_ns,hardware_raw_ns,hardware_received_ns,echo_received_ns\n";
     for (const auto& socket : sockets) for (const auto& e : socket.tx_trace.events)
       trace << socket.interface << ',' << e.id << ',' << e.motor_id << ',' << e.context.sequence << ','
             << e.context.feedback_ns << ',' << e.context.accepted_ns << ',' << e.context.group << ','
             << e.context.powered << ',' << e.call_begin_ns << ',' << e.call_end_ns << ','
             << e.realtime_before_ns << ',' << e.software_realtime_ns << ',' << e.hardware_raw_ns << ','
-            << e.hardware_received_ns << '\n';
+            << e.hardware_received_ns << ',' << e.echo_received_ns << '\n';
     trace.close();
     if (!trace) throw std::runtime_error("cannot write action TX trace");
   }
@@ -2680,7 +2711,7 @@ int main(int argc, char** argv) {
       if (socket_index.count(motor.interface) == 0) {
         socket_index[motor.interface] = sockets.size();
         sockets.push_back(open_socket(motor.interface, options.supermimic_commissioning,
-                                      options.coherent_action_send));
+                                      options.coherent_action_send,options.flexcan_echo));
       }
     }
     if (sockets.size() != 4) throw std::runtime_error("exactly four CAN interfaces required");

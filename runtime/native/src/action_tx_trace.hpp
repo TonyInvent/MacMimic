@@ -26,17 +26,32 @@ struct ActionTxEvent {
   std::int64_t realtime_before_ns=0;
   std::int64_t software_realtime_ns=0, hardware_raw_ns=0;
   std::int64_t hardware_received_ns=0;
+  std::uint64_t payload=0;
+  std::int64_t echo_received_ns=0;
 };
 class ActionTxTrace {
+  std::size_t next_echo_ = 0;
+
 public:
   bool enabled=false;
   ActionTxContext context;
   std::vector<ActionTxEvent> events;
   void prepare() { enabled=true; events.reserve(700000); }
-  void sent(int motor_id, std::int64_t begin, std::int64_t end, std::int64_t realtime=0) {
+  void sent(int motor_id, std::int64_t begin, std::int64_t end, std::int64_t realtime=0, const std::uint8_t* payload=nullptr) {
     if (!enabled) return;
     if (events.size()==events.capacity()) throw std::runtime_error("TX evidence capacity exceeded");
-    events.push_back({context,static_cast<std::uint32_t>(events.size()),motor_id,begin,end,realtime,0,0,0});
+    events.push_back({context,static_cast<std::uint32_t>(events.size()),motor_id,begin,end,realtime,0,0,0,0,0});
+    if (payload) std::memcpy(&events.back().payload,payload,8);
+  }
+  void confirm_echo(int motor_id, const std::uint8_t* payload, std::int64_t now) {
+    if (next_echo_ >= events.size()) throw std::runtime_error("unexpected FlexCAN TX echo");
+    auto& event = events[next_echo_];
+    if (event.motor_id != motor_id || std::memcmp(&event.payload,payload,8) || now < event.call_begin_ns)
+      throw std::runtime_error("FlexCAN TX echo identity or order mismatch");
+    event.echo_received_ns=now;
+    ++next_echo_;
+    if (event.context.group && now-event.context.feedback_ns >= 20'000'000)
+      throw std::runtime_error("FlexCAN TX echo exceeded the action deadline");
   }
   void stamp(std::uint32_t id,std::int64_t software,std::int64_t hardware,std::int64_t received=0) {
     if(id>=events.size()) throw std::runtime_error("TX timestamp unmatched packet ID");
